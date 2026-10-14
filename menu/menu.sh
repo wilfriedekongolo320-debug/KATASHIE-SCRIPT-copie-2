@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MYIP=$(curl -sS ipv4.icanhazip.com)
-readonly SERVER_HOST="https://raw.githubusercontent.com/RootNexTPro/nexTPro-ScriptAll/main"
+readonly SERVER_HOST="https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/main"
 clear
 
 LN='[34m'
@@ -132,9 +132,9 @@ echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━
 echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
 echo -e "${LN}┃${NC} ${BG}                       MENU                     ${NC} ${LN}┃${NC}"
 echo -e "${LN}┃${NC}"
-echo -e "${LN}┃${NC} [01] • SSH/WS MENU        [04] • TROJAN MENU"
-echo -e "${LN}┃${NC} [02] • VMESS MENU         [05] • SOCKS MENU"
-echo -e "${LN}┃${NC} [03] • VLESS MENU         [06] • ZIVPN MENU"
+echo -e "${LN}┃${NC} [01] • SSH/WS MENU🔥        [04] • TROJAN MENU"
+echo -e "${LN}┃${NC} [02] • VMESS MENU⚡️         [05] • SOCKS MENU"
+echo -e "${LN}┃${NC} [03] • VLESS MENU ⭐️        [06] • ZIVPN MENU🚀"
 echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━ 🜲THE_S ━━━━━━━━━━━━━━━━━━━┛${NC}"
 echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
 echo -e "${LN}┃${NC} ${BG}                      TOOLS                     ${NC} ${LN}┃${NC}"
@@ -142,7 +142,7 @@ echo -e "${LN}┃${NC}"
 echo -e "${LN}┃${NC} [07] • DNS PANEL          [11] • NETGUARD PANEL"
 echo -e "${LN}┃${NC} [08] • DOMAIN PANEL       [12] • VPN PORT INFO"
 echo -e "${LN}┃${NC} [09] • IPV6 PANEL         [13] • CLEAN VPS LOGS"
-echo -e "${LN}┃${NC} [10] • VPS STATUS         [14] • 🜲THE_S BOT PANEL"
+echo -e "${LN}┃${NC} [10] • VPS STATUS         [14] • 🜲THE_S BOT 🤘"
 echo -e "${LN}┃${NC} [15] • UNINSTALL THE_S    [16] • FAST DNS MENU"
 echo -e "${LN}┃${NC}"
 echo -e "${LN}┃${NC} [00] • EXIT               [88] • REBOOT VPS"
@@ -150,7 +150,7 @@ echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━
 echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
 echo -e "${LN}┃${NC} ${BG}                   WEB PANEL                    ${NC} ${LN}┃${NC}"
 echo -e "${LN}┃${NC}"
-echo -e "${LN}┃${NC} [18] • 🜲THE_S PANEL"
+echo -e "${LN}┃${NC} [18] • 🜲THE_S PANEL🌍"
 echo -e "${LN}┃${NC}"
 echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
@@ -175,7 +175,7 @@ else
 fi
 echo -e "${NC}"
 
-read -p " Select menu :  "  opt
+read -p " ✅️Select menu🫴 :  "  opt
 echo -e ""
 
 case $opt in
