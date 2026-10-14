@@ -22,7 +22,7 @@ export GR="${GREEN}"
 export RD="${RED}"
 
 # ─── Configuration ────────────────────────────────────────────
-readonly SERVER_HOST="https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main"
+readonly SERVER_HOST="https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/main"
 readonly KATASHIE_VERSION="2.0.0"
 readonly TIMEZONE="Africa/Douala"
 export MYIP=$(wget -qO- ipv4.icanhazip.com 2>/dev/null || curl -s4 https://ipv4.icanhazip.com)
