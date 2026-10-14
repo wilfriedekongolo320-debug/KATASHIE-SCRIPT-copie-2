@@ -9,7 +9,7 @@
 export DEBIAN_FRONTEND=noninteractive
 
 # ─── BUG FIX: Dépôt GitHub corrigé ──────────────────────────
-export SERVER_HOST="https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main"
+export SERVER_HOST="https://github.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-/main"
 export TIMEZONE="${TIMEZONE:-Africa/Douala}"
 
 RED='\033[0;31m'
