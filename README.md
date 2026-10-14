@@ -35,7 +35,7 @@ Chaîne: [WhatsApp Channel](https://whatsapp.com/channel/0029Vb8J9L44Y9li0Ffkqu1
 
 ```bash
 # Installation en une ligne
-wget -qO- https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main/autoinstall.sh | bash
+wget -qO- https://github.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-/main/autoinstall.sh | bash
 ```
 
 ## 🐳 Installation Docker
