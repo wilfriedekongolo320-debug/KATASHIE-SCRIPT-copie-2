@@ -1,346 +1,203 @@
 #!/bin/bash
-# ============================================================
-#   KATASHIE VPN — Menu Principal
-#   Remplace: menu.sh (nexus)
-# ============================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if command -v readlink >/dev/null 2>&1; then
-    real_path=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)
-    if [ -n "$real_path" ]; then
-        SCRIPT_DIR="$(cd "$(dirname "$real_path")" && pwd)"
-    fi
-fi
-resolve_repo_root() {
-    local dir
-    local candidate
-    for candidate in "$SCRIPT_DIR" "$(pwd)" "$HOME" /root /opt /usr/local/src /tmp; do
-        if [ -d "$candidate/katashie_core_bot" ] && [ -f "$candidate/katashie_core_bot/install.sh" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-        if [ -d "$candidate/katashie_deploy_bot" ] && [ -f "$candidate/katashie_deploy_bot/install.sh" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-        if [ -d "$candidate/katashie_whatsapp_bot" ] && [ -f "$candidate/katashie_whatsapp_bot/install.sh" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    for dir in "$SCRIPT_DIR" "$(pwd)"; do
-        while [ "$dir" != "/" ] && [ -n "$dir" ]; do
-            if [ -d "$dir/katashie_core_bot" ] && [ -f "$dir/katashie_core_bot/install.sh" ]; then
-                printf '%s\n' "$dir"
-                return 0
-            fi
-            if [ -d "$dir/katashie_deploy_bot" ] && [ -f "$dir/katashie_deploy_bot/install.sh" ]; then
-                printf '%s\n' "$dir"
-                return 0
-            fi
-            if [ -d "$dir/katashie_whatsapp_bot" ] && [ -f "$dir/katashie_whatsapp_bot/install.sh" ]; then
-                printf '%s\n' "$dir"
-                return 0
-            fi
-            dir="$(dirname "$dir")"
-        done
-    done
-    return 1
-}
+MYIP=$(curl -sS ipv4.icanhazip.com)
+readonly SERVER_HOST="https://raw.githubusercontent.com/RootNexTPro/nexTPro-ScriptAll/main"
+clear
 
-resolve_bot_installer() {
-    local bot_type="$1"  # katashie_core_bot, katashie_deploy_bot, ou katashie_whatsapp_bot
-    local repo_root
-    
-    repo_root="$(resolve_repo_root 2>/dev/null || true)"
-    if [ -n "$repo_root" ] && [ -f "$repo_root/$bot_type/install.sh" ]; then
-        printf '%s\n' "$repo_root/$bot_type/install.sh"
-        return 0
-    fi
-    
-    # Essayer les chemins alternatifs
-    for path in "$SCRIPT_DIR/../$bot_type/install.sh" "/usr/local/sbin/$bot_type/install.sh" "/opt/$bot_type/install.sh" "/root/$bot_type/install.sh"; do
-        if [ -f "$path" ]; then
-            printf '%s\n' "$path"
-            return 0
-        fi
-    done
-    
-    # Fallback: cloner le repo GitHub
-    if command -v git >/dev/null 2>&1; then
-        local tmpdir="/tmp/katashie_$$"
-        if git clone --depth 1 https://github.com/abesskamer237/KATASHIE_VPN.git "$tmpdir" >/dev/null 2>&1; then
-            if [ -f "$tmpdir/$bot_type/install.sh" ]; then
-                chmod +x "$tmpdir/$bot_type/install.sh"
-                printf '%s\n' "$tmpdir/$bot_type/install.sh"
-                return 0
-            fi
-        fi
-        rm -rf "$tmpdir" 2>/dev/null || true
-    fi
-    
-    return 1
-}
-
-resolve_web_installer() {
-    # Chercher web.sh dans les emplacements courants
-    for path in "$SCRIPT_DIR/web.sh" "/usr/local/sbin/web.sh" "/usr/local/bin/web.sh" "$SCRIPT_DIR/web"; do
-        if [ -f "$path" ]; then
-            printf '%s\n' "$path"
-            return 0
-        fi
-    done
-    
-    # Si web.sh n'existe pas, cloner le repo et copier web.sh
-    if command -v git >/dev/null 2>&1; then
-        local tmpdir="/tmp/katashie_web_$$"
-        if git clone --depth 1 https://github.com/abesskamer237/KATASHIE_VPN.git "$tmpdir" >/dev/null 2>&1; then
-            if [ -f "$tmpdir/menu/web.sh" ]; then
-                cp "$tmpdir/menu/web.sh" /usr/local/sbin/web.sh
-                chmod +x /usr/local/sbin/web.sh
-                printf '%s\n' "/usr/local/sbin/web.sh"
-                rm -rf "$tmpdir" 2>/dev/null || true
-                return 0
-            fi
-        fi
-        rm -rf "$tmpdir" 2>/dev/null || true
-    fi
-    
-    return 1
-}
-
-cat << 'BANNER'
- ██╗  ██╗ █████╗ ████████╗ █████╗ ███████╗██╗  ██╗██╗███████╗
- ██║ ██╔╝██╔══██╗╚══██╔══╝██╔══██╗██╔════╝██║  ██║██║██╔════╝
- █████╔╝ ███████║   ██║   ███████║███████╗███████║██║█████╗
- ██╔═██╗ ██╔══██║   ██║   ██╔══██║╚════██║██╔══██║██║██╔══╝
- ██║  ██╗██║  ██║   ██║   ██║  ██║███████║██║  ██║██║███████╗
- ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝
-                       KATASHIE VPN
-BANNER
-if [ -f "$SCRIPT_DIR/ui.sh" ]; then
-    source "$SCRIPT_DIR/ui.sh"
-elif [ -f "/usr/local/sbin/ui.sh" ]; then
-    SCRIPT_DIR="/usr/local/sbin"
-    source "$SCRIPT_DIR/ui.sh"
-else
-    echo "Erreur : ui.sh introuvable" >&2
-    exit 1
-fi
-SCRIPT_DIR="$(resolve_script_dir)"
-
-# ─── Couleurs ────────────────────────────────────────────────
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-WHITE='\033[0;37m'
-CYAN='\033[0;36m'
+LN='[34m'
+BG='[44m'
+NC='[0m'
+GR='[32m'
+RD='[31m'
+GOLD_MAIN='\033[38;5;220m'  # Or pour le logo et les barres
 BOLD='\033[1m'
-BG_BLUE='\033[44m'
-NC='\033[0m'
 
-# Compat héritage
-export LN="${BLUE}"
-export BG="${BG_BLUE}"
-export GR="${GREEN}"
-export RD="${RED}"
+# ==============================================================================
+#  FONCTION : FONCTION BARRE DE PROGRESSION (10 BLOCS)
+# ==============================================================================
+draw_bar() {
+    local val=${1:-0}
+    local filled=$(( val / 10 ))
+    local empty=$(( 10 - filled ))
+    local bar=""
+    
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    echo "$bar"
+}
 
-MYIP=$(curl -sS ipv4.icanhazip.com 2>/dev/null || wget -qO- ipv4.icanhazip.com)
-readonly SERVER_HOST="https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main"
-clear
-
+# ==============================================================================
+#  RÉCUPÉRATION DES MÉTRIQUES & INFOS SYSTEME
+# ==============================================================================
 domain=$(cat /etc/xray/domain 2>/dev/null || echo "N/A")
-uptime_str="$(uptime -p 2>/dev/null | cut -d ' ' -f 2-10 || echo 'N/A')"
-IPV4=$(curl -s -4 ifconfig.co 2>/dev/null || echo 'N/A')
-
-# ─── Vérification de version ──────────────────────────────────
-VERSION_FILE="/etc/katashie/version"
-INSTALLED_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || cat /etc/version 2>/dev/null || echo "2.0.0")
-LATEST_VERSION=$(curl -sS "$SERVER_HOST/version" 2>/dev/null || echo "$INSTALLED_VERSION")
+uptime="$(uptime -p 2>/dev/null | cut -d " " -f 2-10)"
+IPV4=$(curl -s -4 ifconfig.co)
+IPV6=$(curl -s -6 ifconfig.co)
+VERSION_FILE="/etc/version"
+INSTALLED_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "0.0")
+LATEST_VERSION=$(curl -sS "$SERVER_HOST/version" || echo "$INSTALLED_VERSION")
 UPDATE_AVAILABLE=0
+
+# Calcul CPU & RAM
+CPU_USAGE=$(top -bn1 2>/dev/null | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print int(100 - $1)}')
+RAM_USAGE=$(free 2>/dev/null | awk '/Mem:/ {print int($3/$2 * 100)}')
+
+# Génération des barres graphiques
+CPU_BAR=$(draw_bar ${CPU_USAGE:-0})
+RAM_BAR=$(draw_bar ${RAM_USAGE:-0})
+
 version_greater() {
-    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ] && [ "$1" != "$2" ]
+[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ] && [ "$1" != "$2" ]
 }
+
 if version_greater "$LATEST_VERSION" "$INSTALLED_VERSION"; then
-    UPDATE_AVAILABLE=1
-    mkdir -p /usr/local/sbin
-    wget -q -O /usr/local/sbin/update "$SERVER_HOST/menu/update.sh" 2>/dev/null && chmod +x /usr/local/sbin/update
+UPDATE_AVAILABLE=1
+wget -q -O /usr/local/sbin/update "$SERVER_HOST/menu/update.sh" && chmod +x /usr/local/sbin/update
 fi
 
-# ─── Statut des services ──────────────────────────────────────
-get_status() {
-    local svc=$1
-    if systemctl is-active "$svc" >/dev/null 2>&1; then
-        echo -e "${GREEN}●RUN${NC}"
-    else
-        echo -e "${RED}○OFF${NC}"
-    fi
-}
-s_nginx=$(get_status nginx)
-s_xray=$(get_status xray)
-s_ws=$(get_status ws-stunnel)
-
-# ─── Infos OS ─────────────────────────────────────────────────
 if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS_NAME="$NAME $VERSION_ID"
+. /etc/os-release
+OS="$NAME"
+VER="$VERSION_ID"
 else
-    OS_NAME=$(uname -s)
+OS=$(uname -s)
+VER=$(uname -r)
+fi
+
+nginx=$( systemctl is-active nginx 2>/dev/null )
+if [[ $nginx == "active" ]]; then
+status_nginx="${GR}RUN${NC}"
+else
+status_nginx="${RD}OFF${NC}"
+fi
+
+xray=$( systemctl is-active xray 2>/dev/null )
+if [[ $xray == "active" ]]; then
+status_xray="${GR}RUN${NC}"
+else
+status_xray="${RD}OFF${NC}"
+fi
+
+ssh_ws=$( systemctl is-active ws-stunnel 2>/dev/null )
+if [[ $ssh_ws == "active" ]]; then
+status_ws="${GR}RUN${NC}"
+else
+status_ws="${RD}OFF${NC}"
 fi
 
 clear
-menu_header "KATASHIE VPN" "Gestion VPN • Services • Bots"
-echo -e "${MENU_CYAN}╭──────────────────────────────────────────────────╮${NC}"
-echo -e "${MENU_CYAN}│${NC} ${MENU_WHITE}OS${MENU_NC}: ${OS_NAME}    ${MENU_WHITE}IP${MENU_NC}: ${IPV4}"
-echo -e "${MENU_CYAN}│${NC} ${MENU_WHITE}Domaine${MENU_NC}: ${domain}    ${MENU_WHITE}Uptime${MENU_NC}: ${uptime_str}"
-echo -e "${MENU_CYAN}╰──────────────────────────────────────────────────╯${MENU_NC}"
-echo -e "${MENU_CYAN}╭──────────────────────────────────────────────────╮${MENU_NC}"
-echo -e "${MENU_CYAN}│${NC} ${MENU_GREEN}NGINX${MENU_NC}: [${s_nginx}]  ${MENU_GREEN}XRAY${MENU_NC}: [${s_xray}]  ${MENU_GREEN}WS${MENU_NC}: [${s_ws}]"
-echo -e "${MENU_CYAN}╰──────────────────────────────────────────────────╯${MENU_NC}"
 
-echo ""
-menu_section "PROTOCOLES VPN"
-menu_pair "01" "SSH / WebSocket" "$GREEN" "02" "VMess" "$GREEN"
-menu_pair "03" "VLESS" "$GREEN" "04" "Trojan" "$GREEN"
-menu_pair "05" "Socks" "$GREEN" "06" "ZIVPN" "$GREEN"
+# ==============================================================================
+#  1. BANNER ASCII 4K "THE_S" EN OR ET CENTRÉE
+# ==============================================================================
+read -r -d '' BANNER << 'EOF'
+████████╗██╗  ██╗███████╗    ███████╗
+╚══██╔══╝██║  ██║██╔════╝    ██╔════╝
+   ██║   ███████║█████╗      ███████╗
+   ██║   ██╔══██║██╔══╝      ╚════██║
+   ██║   ██║  ██║███████╗    ███████║
+   ╚═╝   ╚═╝  ╚═╝╚══════╝    ╚══════╝
+EOF
 
-echo ""
-menu_section "OUTILS & GESTION"
-menu_pair "07" "DNS Panel" "$CYAN" "08" "Domaine Panel" "$CYAN"
-menu_pair "09" "IPv6 Panel" "$CYAN" "10" "Statut VPS" "$CYAN"
-menu_pair "11" "NetGuard" "$CYAN" "12" "Ports VPN" "$CYAN"
-menu_pair "13" "Nettoyer Logs" "$CYAN" "14" "Fast DNS" "$CYAN"
+TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
+echo -e "${GOLD_MAIN}${BOLD}"
+while IFS= read -r line; do
+    LINE_LEN=${#line}
+    PADDING=$(( (TERM_WIDTH - LINE_LEN) / 2 ))
+    if [ $PADDING -gt 0 ]; then
+        printf "%*s%s\n" "$PADDING" "" "$line"
+    else
+        echo "$line"
+    fi
+done <<< "$BANNER"
+echo -e "${NC}"
 
-echo ""
-menu_section "BOTS & PANNEAU"
-menu_pair "15" "Bot Telegram" "$YELLOW" "16" "Bot Deploy" "$YELLOW"
-menu_pair "17" "Bot WhatsApp" "$YELLOW" "18" "Panneau Web" "$WHITE"
+# ==============================================================================
+#  2. BLOCS DU MENU AVEC BARRES CPU/RAM
+# ==============================================================================
+echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${LN}┃${NC}  OS         : $OS $VER"
+echo -e "${LN}┃${NC}  UPTIME     : $uptime"
+printf "${LN}┃${NC}  CPU USAGE  : [${GOLD_MAIN}%s${NC}] ${GOLD_MAIN}%3d%%${NC}\n" "$CPU_BAR" "${CPU_USAGE:-0}"
+printf "${LN}┃${NC}  RAM USAGE  : [${GOLD_MAIN}%s${NC}] ${GOLD_MAIN}%3d%%${NC}\n" "$RAM_BAR" "${RAM_USAGE:-0}"
+echo -e "${LN}┃${NC}  IPv4       : ${IPV4:-N/A}"
+if [ -n "$IPV6" ]; then
+echo -e "${LN}┃${NC}  IPv6       : $IPV6"
+fi
+echo -e "${LN}┃${NC}  DOMAIN     : $domain"
+echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${LN}┃${NC}   NGINX : [${status_nginx}]    XRAY : [${status_xray}]    WS : [${status_ws}]"
+echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${LN}┃${NC} ${BG}                       MENU                     ${NC} ${LN}┃${NC}"
+echo -e "${LN}┃${NC}"
+echo -e "${LN}┃${NC} [01] • SSH/WS MENU        [04] • TROJAN MENU"
+echo -e "${LN}┃${NC} [02] • VMESS MENU         [05] • SOCKS MENU"
+echo -e "${LN}┃${NC} [03] • VLESS MENU         [06] • ZIVPN MENU"
+echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━ 🜲THE_S ━━━━━━━━━━━━━━━━━━━┛${NC}"
+echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${LN}┃${NC} ${BG}                      TOOLS                     ${NC} ${LN}┃${NC}"
+echo -e "${LN}┃${NC}"
+echo -e "${LN}┃${NC} [07] • DNS PANEL          [11] • NETGUARD PANEL"
+echo -e "${LN}┃${NC} [08] • DOMAIN PANEL       [12] • VPN PORT INFO"
+echo -e "${LN}┃${NC} [09] • IPV6 PANEL         [13] • CLEAN VPS LOGS"
+echo -e "${LN}┃${NC} [10] • VPS STATUS         [14] • 🜲THE_S BOT PANEL"
+echo -e "${LN}┃${NC} [15] • UNINSTALL THE_S    [16] • FAST DNS MENU"
+echo -e "${LN}┃${NC}"
+echo -e "${LN}┃${NC} [00] • EXIT               [88] • REBOOT VPS"
+echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+echo -e "${LN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${LN}┃${NC} ${BG}                   WEB PANEL                    ${NC} ${LN}┃${NC}"
+echo -e "${LN}┃${NC}"
+echo -e "${LN}┃${NC} [18] • 🜲THE_S PANEL"
+echo -e "${LN}┃${NC}"
+echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
-echo ""
-menu_section "SYSTEME"
-menu_pair "88" "Redémarrer VPS" "$RED" "99" "Mise à jour" "$RED"
-menu_pair "00" "Quitter" "$WHITE" "" "" ""
-
-echo ""
-if [ "$UPDATE_AVAILABLE" -eq 1 ] 2>/dev/null; then
-    echo -e "${YELLOW}⚡ Mise à jour disponible v${LATEST_VERSION}${NC}"
+if [ "$UPDATE_AVAILABLE" -eq 1 ]; then
+echo -e "${RD}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+echo -e "${RD}┃${NC} ${RD}[99] • UPDATE SCRIPT (v$LATEST_VERSION)${NC}"
+echo -e "${RD}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 fi
 
-if [ "$UPDATE_AVAILABLE" -eq 1 ] 2>/dev/null; then
-    echo -e "${YELLOW}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-    echo -e "${YELLOW}┃${NC} ${YELLOW}[99]${NC} • ⚡ MISE À JOUR DISPONIBLE (v${LATEST_VERSION})"
-    echo -e "${YELLOW}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
-fi
+# Footer en Rouge et Texte centré
+VERSION=$(cat /etc/version 2>/dev/null || echo "2.1.0")
+FOOTER_TEXT="VERSION:  ${VERSION}  |  SCRIPT BY: 🜲THE_S  
+|  CONTACT Admin: +237 621 67 16 48"
+FOOTER_LEN=${#FOOTER_TEXT}
+FOOTER_PADDING=$(( (TERM_WIDTH - FOOTER_LEN) / 2 ))
 
-echo -e "${BLUE}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-echo -e "${BLUE}┃${NC} ${WHITE}Version    :${NC} ${INSTALLED_VERSION}"
-echo -e "${BLUE}┃${NC} ${WHITE}Script by  :${NC} KATASHIE TEAM"
-echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
-echo -e "${BLUE}●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●${NC}"
-echo ""
-read -p "  Sélectionnez une option : " opt
-echo ""
+echo -e "${RD}${BOLD}"
+if [ $FOOTER_PADDING -gt 0 ]; then
+    printf "%*s%s\n" "$FOOTER_PADDING" "" "$FOOTER_TEXT"
+else
+    echo "$FOOTER_TEXT"
+fi
+echo -e "${NC}"
+
+read -p " Select menu :  "  opt
+echo -e ""
+
 case $opt in
-1 | 01) clear ; exec bash "$SCRIPT_DIR/ssh.sh" ;;
-2 | 02) clear ; exec bash "$SCRIPT_DIR/vmess.sh" ;;
-3 | 03) clear ; exec bash "$SCRIPT_DIR/vless.sh" ;;
-4 | 04) clear ; exec bash "$SCRIPT_DIR/trojan.sh" ;;
-5 | 05) clear ; exec bash "$SCRIPT_DIR/socks.sh" ;;
-6 | 06) clear ; exec bash "$SCRIPT_DIR/zivpn.sh" ;;
-7 | 07) clear ; exec bash "$SCRIPT_DIR/dns.sh" ;;
-8 | 08) clear ; exec bash "$SCRIPT_DIR/domain.sh" ;;
-9 | 09) clear ; exec bash "$SCRIPT_DIR/iptools.sh" ;;
-10)     clear ; exec bash "$SCRIPT_DIR/status.sh" ;;
-11)     clear ; exec bash "$SCRIPT_DIR/netguard.sh" ;;
-12)     clear ; exec bash "$SCRIPT_DIR/port.sh" ;;
-13)     clear ; exec bash "$SCRIPT_DIR/log.sh" ;;
-14)     clear ; exec bash "$SCRIPT_DIR/fastdns.sh" ;;
-15)
-        clear
-        installer="$(resolve_bot_installer katashie_core_bot 2>/dev/null || true)"
-        if [ -n "$installer" ] && [ -x "$installer" ]; then
-            exec bash "$installer"
-        else
-            echo -e "${RED}Erreur : install.sh de Bot Telegram introuvable.${NC}"
-            echo -e "${YELLOW}Le repo GitHub n'a pas pu être cloné. Vérifiez:${NC}"
-            echo "  • La connexion Internet est OK"
-            echo "  • git est installé: command -v git"
-            echo "  • Vous pouvez le cloner manuellement:"
-            echo "    git clone https://github.com/abesskamer237/KATASHIE_VPN.git /root/KATASHIE_VPN"
-            echo ""
-            sleep 3
-            exec bash "$SCRIPT_DIR/menu.sh"
-        fi
-        ;;
-16)
-        clear
-        installer="$(resolve_bot_installer katashie_deploy_bot 2>/dev/null || true)"
-        if [ -n "$installer" ] && [ -x "$installer" ]; then
-            exec bash "$installer"
-        else
-            echo -e "${RED}Erreur : install.sh de Bot Deploy introuvable.${NC}"
-            echo -e "${YELLOW}Le repo GitHub n'a pas pu être cloné. Vérifiez:${NC}"
-            echo "  • La connexion Internet est OK"
-            echo "  • git est installé: command -v git"
-            echo "  • Vous pouvez le cloner manuellement:"
-            echo "    git clone https://github.com/abesskamer237/KATASHIE_VPN.git /root/KATASHIE_VPN"
-            echo ""
-            sleep 3
-            exec bash "$SCRIPT_DIR/menu.sh"
-        fi
-        ;;
-17)
-        clear
-        installer="$(resolve_bot_installer katashie_whatsapp_bot 2>/dev/null || true)"
-        if [ -n "$installer" ] && [ -x "$installer" ]; then
-            exec bash "$installer"
-        else
-            echo -e "${RED}Erreur : install.sh de Bot WhatsApp introuvable.${NC}"
-            echo -e "${YELLOW}Le repo GitHub n'a pas pu être cloné. Vérifiez:${NC}"
-            echo "  • La connexion Internet est OK"
-            echo "  • git est installé: command -v git"
-            echo "  • Vous pouvez le cloner manuellement:"
-            echo "    git clone https://github.com/abesskamer237/KATASHIE_VPN.git /root/KATASHIE_VPN"
-            echo ""
-            sleep 3
-            exec bash "$SCRIPT_DIR/menu.sh"
-        fi
-        ;;
-18)
-        clear
-        web_script="$(resolve_web_installer 2>/dev/null || true)"
-        if [ -n "$web_script" ] && [ -f "$web_script" ]; then
-            exec bash "$web_script"
-        else
-            echo -e "${RED}Erreur : web.sh du panneau introuvable.${NC}"
-            echo -e "${YELLOW}Le repo GitHub n'a pas pu être cloné. Vérifiez:${NC}"
-            echo "  • La connexion Internet est OK"
-            echo "  • git est installé: command -v git"
-            echo "  • Vous pouvez le cloner manuellement:"
-            echo "    git clone https://github.com/abesskamer237/KATASHIE_VPN.git /root/KATASHIE_VPN"
-            echo ""
-            sleep 3
-            exec bash "$SCRIPT_DIR/menu.sh"
-        fi
-        ;;
-88)     reboot ;;
-99)
-        clear
-        if [ -x "/usr/local/sbin/update.sh" ]; then
-            exec bash "/usr/local/sbin/update.sh"
-        elif [ -x "/usr/local/sbin/update" ]; then
-            exec bash "/usr/local/sbin/update"
-        elif [ -x "$SCRIPT_DIR/update.sh" ]; then
-            exec bash "$SCRIPT_DIR/update.sh"
-        elif [ -x "$SCRIPT_DIR/update" ]; then
-            exec bash "$SCRIPT_DIR/update"
-        else
-            echo -e "${RED}Erreur : script de mise à jour introuvable.${NC}"
-            sleep 2
-            exec bash "$SCRIPT_DIR/menu.sh"
-        fi
-        ;;
-0 | 00) exit 0 ;;
-*)      clear ; exec bash "$SCRIPT_DIR/menu.sh" ;;
+1 | 01) clear ; ssh ;;
+2 | 02) clear ; vmess ;;
+3 | 03) clear ; vless ;;
+4 | 04) clear ; trojan ;;
+5 | 05) clear ; socks ;;
+6 | 06) clear ; zivpn ;;
+7 | 07) clear ; dns ;;
+8 | 08) clear ; domain ;;
+9 | 09) clear ; iptools ;;
+10) clear ; status ;;
+11) clear ; netguard ;;
+12) clear ; port ;;
+13) clear ; log ;;
+14) clear ; tgbot ;;
+15) clear ; uninstall ;;
+16) clear ; fastdns ;;
+18) clear ; web ;;
+88) reboot ;;
+99) clear ; update ;;
+0 | 00) exit ;;
+*) clear ; menu ;;
 esac
