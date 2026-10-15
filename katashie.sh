@@ -240,17 +240,11 @@ run_scripts() {
         if wget -q "$url" -O "/tmp/${script}"; then
             chmod +x "/tmp/${script}"
             echo -e "${GREEN}✔${NC}"
-            
-            # Correction spécifique pour setup_dns.sh si la commande read manque de </dev/tty
-            if [ "$script" = "setup_dns.sh" ]; then
-                sed -i 's/read /read -p /g' "/tmp/${script}" 2>/dev/null || true
-                sed -i 's/read -r /read -rp /g' "/tmp/${script}" 2>/dev/null || true
-                # Ajout de </dev/tty sur les lectures pour éviter le blocage infini
-                sed -i 's/\b(read\b[^<]*)/\1 </dev/tty/g' "/tmp/${script}" 2>/dev/null || true
-            fi
-
             log_info "Exécution de ${script}..."
-            bash "/tmp/${script}"
+            
+            # Execution interactive forcée avec </dev/tty
+            bash "/tmp/${script}" </dev/tty
+            
             log_success "${script} terminé."
         else
             echo -e "${RED}✘${NC}"
