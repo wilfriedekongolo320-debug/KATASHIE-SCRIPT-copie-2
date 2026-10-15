@@ -1,7 +1,7 @@
 {
   "bot_token": "VOTRE_TOKEN_TELEGRAM",
   "admin_ids": [123456789],
-  "install_url": "https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main/autoinstall.sh",
+  "install_url": "https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/main",
   "vps_presets": {
     "vps-cmr-1": {
       "host": "10.0.0.1",
