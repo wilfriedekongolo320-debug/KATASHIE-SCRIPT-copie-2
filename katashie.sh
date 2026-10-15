@@ -25,7 +25,7 @@ export RD="${RED}"
 readonly SERVER_HOST="https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/main"
 readonly KATASHIE_VERSION="2.0.0"
 readonly TIMEZONE="Africa/Douala"
-export MYIP=$(wget -qO- ipv4.icanhazip.com 2>/dev/null || curl -s4 https://ipv4.icanhazip.com)
+export MYIP=$(wget -qO- ipv4.icanhazip.com 2>/dev/null || curl -s4 https://ipv4.icanhazip.com || hostname -I | awk '{print $1}')
 
 # ─── Helpers ──────────────────────────────────────────────────
 TIMESTAMP() { date '+%Y-%m-%d %H:%M:%S'; }
@@ -53,7 +53,7 @@ show_banner() {
     cat << 'BANNER'
  ██╗  ██╗ █████╗ ████████╗ █████╗ ███████╗██╗  ██╗██╗███████╗
  ██║ ██╔╝██╔══██╗╚══██╔══╝██╔══██╗██╔════╝██║  ██║██║██╔════╝
- █████╔╝ ███████║   ██║   ███████║███████╗███████║██║█████╗
+ █████╔╝ ███████║   ██║   ███████║███████║███████║██║█████╗
  ██╔═██╗ ██╔══██║   ██║   ██╔══██║╚════██║██╔══██║██║██╔══╝
  ██║  ██╗██║  ██║   ██║   ██║  ██║███████║██║  ██║██║███████╗
  ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝
@@ -163,30 +163,29 @@ show_tns() {
     echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
     echo -e "${BLUE}●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●${NC}"
     echo ""
-    read -p "  Votre choix : " opt
-    # Nettoyage basique : suppression des retours chariot et trim
-    opt=$(echo "$opt" | tr -d '\r' | xargs)
-    echo ""
-    case $opt in
-    1 | 01)
-        log_success "Conditions acceptées. Démarrage de l'installation..."
-        sleep 2
-        add_domain
-        ;;
-    2 | 02)
-        log_warn "Conditions refusées. Suppression des scripts et sortie..."
-        rm -f /root/*.sh
-        sleep 5
-        exit 0
-        ;;
-    *)
-        log_error "Choix invalide!"
-        rm -f /root/*.sh
-        sleep 5
-        exit 0
-        ;;
-    esac
 
+    local opt=""
+    while true; do
+        read -rp "  Votre choix [1/2] : " opt </dev/tty
+        opt=$(echo "$opt" | tr -d '\r\n' | xargs)
+        
+        case "$opt" in
+            1|01)
+                log_success "Conditions acceptées. Démarrage de l'installation..."
+                sleep 2
+                add_domain
+                break
+                ;;
+            2|02)
+                log_warn "Conditions refusées. Annulation..."
+                rm -f /tmp/*.sh
+                exit 0
+                ;;
+            *)
+                log_error "Choix invalide. Veuillez entrer 1 pour accepter ou 2 pour refuser."
+                ;;
+        esac
+    done
 }
 
 add_domain() {
@@ -201,8 +200,7 @@ add_domain() {
     echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
     echo ""
     while true; do
-        read -rp "  Hostname / Domaine : " host
-        # Nettoyage de l'entrée : suppression des espaces et caractères invisibles
+        read -rp "  Hostname / Domaine : " host </dev/tty
         host=$(echo "$host" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         if [[ -z "$host" ]]; then
             log_error "Le domaine ne peut pas être vide."
@@ -287,7 +285,7 @@ install_menu() {
     if [ "$failed" -eq 0 ]; then
         log_success "Scripts de menu installés dans /usr/local/sbin/"
     else
-        log_warn "Certains scripts de menu n'ont pas pu être installés. Vérifiez la connexion réseau ou le dépôt."
+        log_warn "Certains scripts de menu n'ont pas pu être installés."
     fi
 }
 
@@ -319,13 +317,11 @@ BASHRC_EOF
 
 setup_crons() {
     log_step "Configuration des tâches planifiées..."
-    grep -q "shutdown -r now" /etc/crontab || \
-        echo "0 0 * * * root /sbin/shutdown -r now" >> /etc/crontab
     grep -q "/usr/local/sbin/log" /etc/crontab || \
         echo "*/30 * * * * root /usr/local/sbin/log" >> /etc/crontab
     grep -q "/usr/local/sbin/expiry" /etc/crontab || \
         echo "55 23 * * * root /usr/local/sbin/expiry" >> /etc/crontab
-    log_success "Crons configurés (reboot@00:00, log@30min, expiry@23:55)."
+    log_success "Crons configurés (log@30min, expiry@23:55)."
 }
 
 enable_bbr() {
@@ -351,15 +347,6 @@ restart_services() {
                 echo -ne "${GREEN}✔${NC} ${svc} "
             else
                 echo -ne "${YELLOW}⚠${NC} ${svc} "
-            fi
-        fi
-    done
-    for port in 7100 7200 7300; do
-        svc="badvpn@${port}"
-        if systemctl list-unit-files 2>/dev/null | grep -q "^${svc}.service"; then
-            if systemctl enable "$svc" >/dev/null 2>&1 && \
-               (systemctl restart "$svc" >/dev/null 2>&1 || true); then
-                echo -ne "${GREEN}✔${NC} badvpn:${port} "
             fi
         fi
     done
@@ -398,7 +385,7 @@ katashie_completed() {
 }
 
 cleanner() {
-    rm -f /root/*.sh /tmp/*.sh 2>/dev/null || true
+    rm -f /tmp/*.sh 2>/dev/null || true
     log_success "Fichiers temporaires supprimés."
 }
 
