@@ -20,7 +20,7 @@ else:
 
 BOT_TOKEN  = cfg.get('bot_token', '')
 ADMIN_IDS  = cfg.get('admin_ids', [])
-INSTALL_URL = cfg.get('install_url', 'https://raw.githubusercontent.com/abesskamer237/KATASHIE_VPN/main/autoinstall.sh')
+INSTALL_URL = cfg.get('install_url', 'https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/main')
 
 if not BOT_TOKEN:
     raise SystemExit('Missing Telegram bot token. Set KATASHIE_DEPLOY_CONFIG or /etc/katashie_deploy_bot/config.json')
