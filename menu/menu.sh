@@ -154,12 +154,6 @@ echo -e "${LN}┃${NC} [18] • 🜲THE_S PANEL🌍"
 echo -e "${LN}┃${NC}"
 echo -e "${LN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
-if [ "$UPDATE_AVAILABLE" -eq 1 ]; then
-echo -e "${RD}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-echo -e "${RD}┃${NC} ${RD}[99] • UPDATE SCRIPT (v$LATEST_VERSION)${NC}"
-echo -e "${RD}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
-fi
-
 # Footer en Rouge et Texte centré
 VERSION=$(cat /etc/version 2>/dev/null || echo "2.1.0")
 FOOTER_TEXT="VERSION:  ${VERSION}  |  SCRIPT BY: 🜲THE_S  
