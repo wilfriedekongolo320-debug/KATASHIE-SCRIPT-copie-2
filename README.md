@@ -1,8 +1,6 @@
-# 🛡 KATASHIE VPN v2.0🚀🚀🔥 ET THE_S TUNNEL 
+#📶🛜THE_S TUNNEL ⌛️🔑📶🦾🇨🇲🇨🇲🇨🇲🔥
 
-**Auto-installeur VPN multi-protocoles pour VPS Linux**  
-Contact: [@abess237](https://t.me/abess237) | [WhatsApp](https://wa.me/237682229367)  
-Chaîne: [WhatsApp Channel](https://whatsapp.com/channel/0029Vb8J9L44Y9li0Ffkqu1J)
+**Auto-installeur VPN multi-protocoles 
 
 ---
 
