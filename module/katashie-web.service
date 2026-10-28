@@ -1,5 +1,5 @@
 [Unit]
-Description=KATASHIE VPN Web Panel
+Description=THE_S VPN Web Panel
 After=network.target
 
 [Service]
