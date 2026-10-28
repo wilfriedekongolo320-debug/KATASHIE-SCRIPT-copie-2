@@ -1,7 +1,7 @@
 {
-  "name": "katashie-vpn-web",
+  "name": "THE_S_NET",
   "version": "2.0.0",
-  "description": "KATASHIE VPN — Panneau Web (serveur Node.js + interface React)",
+  "description": "THE_S VPN — Panneau Web (serveur Node.js + interface React)",
   "main": "dist/server/index.js",
   "scripts": {
     "build:server": "tsc",
