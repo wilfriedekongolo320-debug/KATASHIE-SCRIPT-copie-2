@@ -61,6 +61,17 @@ apt-get update -y >/dev/null 2>&1
 apt-get install -y wget curl bc >/dev/null 2>&1
 log_success "Outils installés."
 
+# ─── Télécharger et installer les bots Telegram ─────────────
+# Installer les fichiers avant katashie.sh (qui redémarre le VPS à la fin).
+log_info "Téléchargement de l'installateur des bots Telegram..."
+if wget -qO /root/install_telegram_bots.sh "${SERVER_HOST}/install_telegram_bots.sh"; then
+    chmod +x /root/install_telegram_bots.sh
+    log_info "Téléchargement et installation des bots Telegram..."
+    bash /root/install_telegram_bots.sh
+else
+    log_error "Impossible de télécharger ${SERVER_HOST}/install_telegram_bots.sh"
+fi
+
 log_info "Optimisation réseau (IPv4 prioritaire)..."
 echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf 2>/dev/null || true
 sysctl -w net.ipv6.conf.all.disable_ipv6=1     >/dev/null 2>&1
