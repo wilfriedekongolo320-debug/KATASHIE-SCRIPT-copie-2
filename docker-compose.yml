@@ -44,6 +44,7 @@ services:
       dockerfile: ../Dockerfile.bot
     container_name: katashie-core-bot
     restart: unless-stopped
+    command: ["python3", "-u", "katashie_bot.py"]
     volumes:
       - /etc/katashie_bot:/etc/katashie_bot:ro
       - /var/lib/katashie_bot:/var/lib/katashie_bot

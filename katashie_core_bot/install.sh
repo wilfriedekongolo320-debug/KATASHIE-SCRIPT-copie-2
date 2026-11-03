@@ -4,6 +4,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 echo "=== Installation du Bot Telegram Principal KATASHIE VPN ==="
 python3 -m pip install -r requirements.txt
+python3 -m pip check
+python3 -m compileall -q katashie_bot.py modules
 install -d -m 0750 /etc/katashie_bot /var/lib/katashie_bot
 # Keep the deployed credentials, IDs and configuration intact on upgrades.
 if [ ! -f /etc/katashie_bot/config.json ]; then
