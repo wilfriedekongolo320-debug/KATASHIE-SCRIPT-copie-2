@@ -7,7 +7,7 @@ python3 -m pip install -r requirements.txt
 python3 -m pip check
 python3 -m compileall -q katashie_bot.py modules
 install -d -m 0750 /etc/katashie_bot /var/lib/katashie_bot
-# Keep the deployed credentials, IDs and configuration intact on upgrades.
+# Keep the deployed token, Telegram IDs and existing config intact on upgrades.
 if [ ! -f /etc/katashie_bot/config.json ]; then
   install -m 0600 config.example.json /etc/katashie_bot/config.json
   echo "Configurez /etc/katashie_bot/config.json avec le vrai token et les identifiants Telegram."
