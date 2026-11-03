@@ -4,4 +4,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["python3", "-u", "main.py"]
+# The docker-compose service explicitly sets the Python script to run.
+# Do not force main.py here; the project ships bot files named katashie_bot.py,
+# deploy_bot.py and whatsapp_bot.py instead.

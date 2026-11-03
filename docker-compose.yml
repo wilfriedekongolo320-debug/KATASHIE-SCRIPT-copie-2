@@ -4,7 +4,7 @@ version: '3.9'
 #  KATASHIE VPN — Docker Compose
 #  BUG FIX: volume katashie-db maintenant monté sur /etc/katashie-web
 #  pour correspondre à KATASHIE_DB_DIR dans db.ts / backupCron.ts
-# ════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════
 
 services:
   # ─── Panneau Web ──────────────────────────────────────────────
@@ -52,12 +52,14 @@ services:
       dockerfile: ../Dockerfile.bot
     container_name: katashie-core-bot
     restart: unless-stopped
+    command: ["python3", "-u", "katashie_bot.py"]
     volumes:
       - /etc/katashie_bot:/etc/katashie_bot:ro
       - /etc/xray:/etc/xray
       - /usr/local/etc/xray:/usr/local/etc/xray
     environment:
       - KATASHIE_BOT_CONFIG=/etc/katashie_bot/config.json
+      - PYTHONUNBUFFERED=1
     networks:
       - katashie-net
     depends_on:
@@ -71,27 +73,31 @@ services:
       dockerfile: ../Dockerfile.bot
     container_name: katashie-deploy-bot
     restart: unless-stopped
+    command: ["python3", "-u", "deploy_bot.py"]
     volumes:
       - /etc/katashie_deploy_bot:/etc/katashie_deploy_bot:ro
       - ~/.ssh:/root/.ssh:ro
     environment:
       - KATASHIE_DEPLOY_CONFIG=/etc/katashie_deploy_bot/config.json
+      - PYTHONUNBUFFERED=1
     networks:
       - katashie-net
 
-  # ─── Bot WhatsApp ─────────────────────────────────────────────
+  # ─── Bot WhatsApp ───────────────���─────────────────────────────
   katashie-whatsapp-bot:
     build:
       context: ./katashie_whatsapp_bot
       dockerfile: ../Dockerfile.bot
     container_name: katashie-whatsapp-bot
     restart: unless-stopped
+    command: ["python3", "-u", "whatsapp_bot.py"]
     ports:
       - "5001:5001"
     volumes:
       - /etc/katashie_whatsapp_bot:/etc/katashie_whatsapp_bot:ro
     environment:
       - KATASHIE_WA_CONFIG=/etc/katashie_whatsapp_bot/config.json
+      - PYTHONUNBUFFERED=1
     networks:
       - katashie-net
 
