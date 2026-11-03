@@ -2,12 +2,8 @@ version: '3.9'
 
 # ════════════════════════════════════════════════════════════════
 #  KATASHIE VPN — Docker Compose
-#  BUG FIX: volume katashie-db maintenant monté sur /etc/katashie-web
-#  pour correspondre à KATASHIE_DB_DIR dans db.ts / backupCron.ts
 # ════════════════════════════════════════════════════════════════
-
 services:
-  # ─── Panneau Web ──────────────────────────────────────────────
   katashie-web:
     build:
       context: ./nexus-web
@@ -17,11 +13,9 @@ services:
     ports:
       - "2087:2087"
     volumes:
-      # BUG FIX: chemin standardisé /etc/katashie-web (cohérent avec db.ts)
       - katashie-db:/etc/katashie-web
       - katashie-backups:/tmp/katashie_backups
     environment:
-      # BUG FIX: variable standardisée KATASHIE_DB_DIR
       - KATASHIE_DB_DIR=/etc/katashie-web
       - NEXUS_ADMIN_USER=${ADMIN_USER:-admin}
       - NEXUS_ADMIN_PASS=${ADMIN_PASS:-admin123}
@@ -36,8 +30,7 @@ services:
       - BACKUP_S3_ACCESS_KEY=${BACKUP_S3_ACCESS_KEY:-}
       - BACKUP_S3_SECRET_KEY=${BACKUP_S3_SECRET_KEY:-}
       - BACKUP_S3_REGION=${BACKUP_S3_REGION:-us-east-1}
-    networks:
-      - katashie-net
+    networks: [katashie-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2087/api/health"]
       interval: 30s
@@ -45,7 +38,6 @@ services:
       retries: 3
       start_period: 20s
 
-  # ─── Bot Telegram Principal ───────────────────────────────────
   katashie-core-bot:
     build:
       context: ./katashie_core_bot
@@ -54,17 +46,18 @@ services:
     restart: unless-stopped
     volumes:
       - /etc/katashie_bot:/etc/katashie_bot:ro
+      - /var/lib/katashie_bot:/var/lib/katashie_bot
       - /etc/xray:/etc/xray
       - /usr/local/etc/xray:/usr/local/etc/xray
+      - /etc/zivpn:/etc/zivpn
     environment:
       - KATASHIE_BOT_CONFIG=/etc/katashie_bot/config.json
-    networks:
-      - katashie-net
+      - KATASHIE_BOT_DB=/var/lib/katashie_bot/state.sqlite3
+    networks: [katashie-net]
     depends_on:
       katashie-web:
         condition: service_started
 
-  # ─── Bot Deploy Multi-VPS ──────────────────────────────────────
   katashie-deploy-bot:
     build:
       context: ./katashie_deploy_bot
@@ -76,10 +69,8 @@ services:
       - ~/.ssh:/root/.ssh:ro
     environment:
       - KATASHIE_DEPLOY_CONFIG=/etc/katashie_deploy_bot/config.json
-    networks:
-      - katashie-net
+    networks: [katashie-net]
 
-  # ─── Bot WhatsApp ─────────────────────────────────────────────
   katashie-whatsapp-bot:
     build:
       context: ./katashie_whatsapp_bot
@@ -92,10 +83,8 @@ services:
       - /etc/katashie_whatsapp_bot:/etc/katashie_whatsapp_bot:ro
     environment:
       - KATASHIE_WA_CONFIG=/etc/katashie_whatsapp_bot/config.json
-    networks:
-      - katashie-net
+    networks: [katashie-net]
 
-  # ─── Nginx Reverse Proxy ──────────────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: katashie-nginx
@@ -107,10 +96,8 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - nginx-logs:/var/log/nginx
-    networks:
-      - katashie-net
-    depends_on:
-      - katashie-web
+    networks: [katashie-net]
+    depends_on: [katashie-web]
 
 volumes:
   katashie-db:

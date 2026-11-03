@@ -1,13 +1,19 @@
 [Unit]
 Description=KATASHIE VPN — Core Telegram Bot
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
+User=root
 WorkingDirectory=/etc/katashie_bot
+Environment=KATASHIE_BOT_CONFIG=/etc/katashie_bot/config.json
+Environment=KATASHIE_BOT_DB=/var/lib/katashie_bot/state.sqlite3
+StateDirectory=katashie_bot
+StateDirectoryMode=0750
 ExecStart=/usr/bin/python3 /etc/katashie_bot/katashie_bot.py
 Restart=always
-RestartSec=10
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
