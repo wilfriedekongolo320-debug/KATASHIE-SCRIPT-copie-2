@@ -14,7 +14,7 @@ CONFIG_FILE    = '/etc/pps_bot/config.json'
 RESELLERS_FILE = '/etc/pps_bot/resellers.json'
 CONVS_FILE     = '/etc/pps_bot/convs.json'
 VISITORS_FILE  = '/etc/pps_bot/visitors.json'
-MENU_IMAGE_URL = "https://github.com/ppstech237/pps-tg-bot/blob/main/pps.jpg?raw=true"
+MENU_IMAGE_URL = ""
 
 def load_config():
     if not os.path.exists(CONFIG_FILE): return None
