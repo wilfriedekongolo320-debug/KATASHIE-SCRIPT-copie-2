@@ -15,13 +15,21 @@ Les alertes sont dédupliquées dans `/var/lib/the-s-bot/state.json`. L'échéan
 
 ## Installation sur le VPS
 
-Depuis le dépôt cloné :
+L'installateur télécharge automatiquement depuis GitHub les trois fichiers requis (`Thes.py`, `the_s_bot/requirements.txt` et `module/the-s-bot.service`). Il n'est pas nécessaire de cloner le dépôt au préalable. Depuis le dépôt cloné, lancer :
 
 ```bash
 sudo bash the_s_bot/install.sh
 ```
 
-L'installateur demande le token Telegram et l'ID du super administrateur si `/etc/the_s_bot/config.json` n'existe pas. Il installe un environnement virtuel, copie le bot sous `/etc/the_s_bot/Thes.py`, puis active `the-s-bot.service`. Le fichier existant `/etc/the_s_bot/resellers.json` est conservé ; s'il est absent, un fichier vide est créé.
+Ou, sans clone local :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2/copilot/reseller-monitor-only/the_s_bot/install.sh | sudo bash
+```
+
+Le dépôt/revision sont personnalisables avec `THE_S_BOT_REPO` et `THE_S_BOT_REF` ; `THE_S_BOT_RAW_BASE` permet de fournir une base d'URL raw complète. Par défaut, le script utilise la branche `copilot/reseller-monitor-only`. Après fusion de cette branche, définir `THE_S_BOT_REF=main` pour installer depuis `main`.
+
+L'installateur demande le token Telegram et l'ID du super administrateur si `/etc/the_s_bot/config.json` n'existe pas. Il installe un environnement virtuel et active `the-s-bot.service`. Le fichier existant `/etc/the_s_bot/resellers.json` est conservé ; s'il est absent, un fichier vide est créé.
 
 Pour installer sans saisie interactive, fournir `THE_S_BOT_TOKEN` et `THE_S_BOT_SUPER_ADMIN` dans l'environnement avant de lancer le script. Pour vérifier le service :
 
