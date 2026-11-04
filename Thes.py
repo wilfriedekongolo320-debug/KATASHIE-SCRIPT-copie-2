@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bot Telegram : surveillance revendeurs + gestion comptes VPN/SSH."""
+"""Bot Telegram Thes : surveillance revendeurs et gestion VPN avec rôles."""
 from __future__ import annotations
 
 import base64
@@ -28,6 +28,7 @@ POLL_SECONDS = max(60, int(os.environ.get("THE_S_BOT_POLL_SECONDS", "300")))
 ALERT_THRESHOLDS = ((24, "24 heures"), (6, "6 heures"))
 XRAY_CONFIG = "/etc/xray/config.json"
 ZIVPN_DB = "/etc/zivpn/users.db"
+USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{1,32}$")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("the-s-vpn-bot")
@@ -42,6 +43,114 @@ def load_json(path: Path, default: Any) -> Any:
     except (OSError, json.JSONDecodeError) as exc:
         logger.error("Lecture impossible pour %s: %s", path, exc)
         return default
+
+
+config = load_json(CONFIG_FILE, {})
+if not isinstance(config, dict):
+    raise SystemExit(f"Configuration invalide : {CONFIG_FILE}")
+BOT_TOKEN = str(config.get("bot_token", "")).strip()
+try:
+    SUPER_ADMIN = int(config.get("super_admin", 0))
+except (TypeError, ValueError):
+    SUPER_ADMIN = 0
+if not BOT_TOKEN or not SUPER_ADMIN:
+    raise SystemExit(f"Renseignez bot_token et super_admin dans {CONFIG_FILE}")
+
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+state_lock = threading.RLock()
+
+
+def escaped(value: Any) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(args, 1, "", str(exc))
+
+
+def run_shell(command: str, timeout: int = 30) -> str:
+    result = run(["bash", "-lc", command], timeout)
+    return (result.stdout + result.stderr).strip()
+
+
+def load_state() -> dict[str, Any]:
+    data = load_json(STATE_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+
+def save_state(state: dict[str, Any]) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp = STATE_FILE.with_suffix(".tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        json.dump(state, handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, STATE_FILE)
+
+
+def get_role_ids(role: str) -> set[int]:
+    # Migration douce des listes présentes dans l'ancienne configuration.
+    legacy_keys = {"admin": ("admin_ids", "admins"), "reseller": ("reseller_ids", "resellers_ids")}
+    ids: set[int] = set()
+    for key in legacy_keys.get(role, ()):
+        values = config.get(key, [])
+        if isinstance(values, list):
+            for value in values:
+                try:
+                    ids.add(int(value))
+                except (TypeError, ValueError):
+                    logger.warning("ID %r invalide dans %s", value, key)
+    state = load_state()
+    roles = state.get("telegram_roles", {})
+    values = roles.get(role, []) if isinstance(roles, dict) else []
+    if isinstance(values, list):
+        for value in values:
+            try:
+                ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+    return ids
+
+
+def role_for(uid: int) -> str | None:
+    if uid == SUPER_ADMIN:
+        return "super_admin"
+    if uid in get_role_ids("admin"):
+        return "admin"
+    if uid in get_role_ids("reseller"):
+        return "reseller"
+    return None
+
+
+def is_super(uid: int) -> bool:
+    return uid == SUPER_ADMIN
+
+
+def require_role(message: Any, roles: set[str]) -> str | None:
+    role = role_for(message.from_user.id)
+    if role not in roles:
+        bot.reply_to(message, "⛔ Accès refusé pour votre rôle.")
+        return None
+    return role
+
+
+def parse_days(value: str) -> int | None:
+    try:
+        days = int(value)
+        return days if 1 <= days <= 3650 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def load_resellers() -> dict[str, dict[str, Any]]:
+    data = load_json(RESELLERS_FILE, {})
+    if not isinstance(data, dict):
+        logger.error("Le fichier revendeurs doit contenir un objet JSON.")
+        return {}
+    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -64,8 +173,7 @@ def reseller_expiry(info: dict[str, Any]) -> datetime | None:
     if added is None:
         return None
     try:
-        default_hours = 48 if info.get("type") == "trial" else int(info.get("max_days", 30)) * 24
-        hours = int(info.get("max_hours", default_hours))
+        hours = int(info.get("max_hours", 48 if info.get("type") == "trial" else int(info.get("max_days", 30)) * 24))
         return added + timedelta(hours=hours) if hours >= 0 else None
     except (TypeError, ValueError, OverflowError):
         return None
@@ -81,113 +189,38 @@ def remaining(expiry: datetime, now: datetime) -> str:
     return f"{days} j {hours} h" if days else (f"{hours} h {minutes} min" if hours else f"{minutes} min")
 
 
-def escaped(value: Any) -> str:
-    return html.escape(str(value), quote=False)
+def reseller_label(reseller_id: str, info: dict[str, Any]) -> str:
+    alias = escaped(info.get("alias") or info.get("first_name") or reseller_id)
+    kind = escaped(info.get("type", "inconnu")).upper()
+    return f"<b>{alias}</b> (ID <code>{escaped(reseller_id)}</code>, {kind})"
 
 
-def _run(cmd: str, timeout: int = 30) -> str:
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return (result.stdout + result.stderr).strip()
-    except Exception as exc:
-        return str(exc)
-
-
-config = load_json(CONFIG_FILE, {})
-if not isinstance(config, dict):
-    raise SystemExit(f"Configuration invalide : {CONFIG_FILE}")
-BOT_TOKEN = str(config.get("bot_token", "")).strip()
-try:
-    SUPER_ADMIN = int(config.get("super_admin", 0))
-except (TypeError, ValueError):
-    SUPER_ADMIN = 0
-ADMIN_IDS = []
-for key in ("admin_ids", "admins"):
-    raw = config.get(key, [])
-    if isinstance(raw, list):
-        for item in raw:
-            try:
-                ADMIN_IDS.append(int(item))
-            except (TypeError, ValueError):
-                continue
-ADMIN_IDS = list(dict.fromkeys([SUPER_ADMIN, *ADMIN_IDS]))
-if not BOT_TOKEN or not SUPER_ADMIN:
-    raise SystemExit(f"Renseignez bot_token et super_admin dans {CONFIG_FILE}")
-
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
-state_lock = threading.Lock()
-
-
-def is_admin(uid: int) -> bool:
-    return uid == SUPER_ADMIN or uid in ADMIN_IDS
-
-
-def authorized(message: Any, require_super: bool = False) -> bool:
-    allowed = is_admin(message.from_user.id)
-    if require_super and message.from_user.id != SUPER_ADMIN:
-        allowed = False
-    if not allowed:
-        bot.reply_to(message, "⛔ Commande réservée à l’administrateur.")
-        return False
-    return True
-
-
-def load_state() -> dict[str, Any]:
-    state = load_json(STATE_FILE, {})
-    return state if isinstance(state, dict) else {}
-
-
-def save_state(state: dict[str, Any]) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp = STATE_FILE.with_suffix(".tmp")
-    with temp.open("w", encoding="utf-8") as handle:
-        json.dump(state, handle, ensure_ascii=False, indent=2)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temp, STATE_FILE)
-
-
-def load_resellers() -> dict[str, dict[str, Any]]:
-    data = load_json(RESELLERS_FILE, {})
-    if not isinstance(data, dict):
-        logger.error("Le fichier revendeurs doit contenir un objet JSON.")
-        return {}
-    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
-
-
-def send_admin(text: str) -> None:
+def notify_super(text: str) -> None:
     try:
         bot.send_message(SUPER_ADMIN, text)
     except Exception:
         logger.exception("Notification impossible au super administrateur")
 
 
-def label(reseller_id: str, info: dict[str, Any]) -> str:
-    alias = escaped(info.get("alias") or info.get("first_name") or reseller_id)
-    kind = escaped(info.get("type", "inconnu")).upper()
-    return f"<b>{alias}</b> (ID <code>{escaped(reseller_id)}</code>, {kind})"
-
-
 def scan_resellers(notify_changes: bool = True) -> list[tuple[str, dict[str, Any], datetime | None]]:
     now = datetime.now()
     resellers = load_resellers()
-    state = load_state()
-    current_ids = set(resellers)
     with state_lock:
+        state = load_state()
+        current_ids = set(resellers)
         prior = state.get("known_resellers")
         if not isinstance(prior, list):
             state["known_resellers"] = sorted(current_ids)
         elif notify_changes:
             for rid in sorted(current_ids - set(map(str, prior))):
-                send_admin(f"🆕 Nouveau revendeur détecté : {label(rid, resellers[rid])}.")
+                notify_super(f"🆕 Nouveau revendeur détecté : {reseller_label(rid, resellers[rid])}.")
             for rid in sorted(set(map(str, prior)) - current_ids):
-                send_admin(f"➖ Revendeur retiré : <code>{escaped(rid)}</code>.")
+                notify_super(f"➖ Revendeur retiré : <code>{escaped(rid)}</code>.")
             state["known_resellers"] = sorted(current_ids)
-
         alerts = state.setdefault("alerts", {})
         if not isinstance(alerts, dict):
             alerts = state["alerts"] = {}
-        rows: list[tuple[str, dict[str, Any], datetime | None]] = []
+        rows = []
         for rid, info in resellers.items():
             expiry = reseller_expiry(info)
             rows.append((rid, info, expiry))
@@ -200,13 +233,13 @@ def scan_resellers(notify_changes: bool = True) -> list[tuple[str, dict[str, Any
             sent = set(entry.get("sent", []))
             delta = expiry - now
             if delta.total_seconds() <= 0 and "expired" not in sent:
-                send_admin(f"⛔ Abonnement expiré : {label(rid, info)}. Échéance : <code>{expiry:%d/%m/%Y %H:%M}</code>.")
+                notify_super(f"⛔ Abonnement expiré : {reseller_label(rid, info)}. Échéance : <code>{expiry:%d/%m/%Y %H:%M}</code>.")
                 sent.add("expired")
             elif delta.total_seconds() > 0:
                 for hours, description in ALERT_THRESHOLDS:
                     key = f"{hours}h"
                     if delta <= timedelta(hours=hours) and key not in sent:
-                        send_admin(f"⚠️ Échéance dans moins de {description} : {label(rid, info)}. Temps restant : <b>{remaining(expiry, now)}</b> (échéance <code>{expiry:%d/%m/%Y %H:%M}</code>).")
+                        notify_super(f"⚠️ Échéance dans moins de {description} : {reseller_label(rid, info)}. Temps restant : <b>{remaining(expiry, now)}</b> (échéance <code>{expiry:%d/%m/%Y %H:%M}</code>).")
                         sent.add(key)
             entry["expiry"], entry["sent"] = expiry_key, sorted(sent)
             alerts[rid] = entry
@@ -216,604 +249,401 @@ def scan_resellers(notify_changes: bool = True) -> list[tuple[str, dict[str, Any
     return rows
 
 
-def show_menu(chat_id: int) -> None:
-    caption = (
-        "🛡 <b>Surveillance + Gestion VPN</b>\n\n"
-        "Bot unifié KATASHIE / Thes.\n\n"
-        "<code>/resellers</code> — Liste et temps restant\n"
-        "<code>/status</code> — Résumé des échéances\n"
-        "<code>/check</code> — Vérifier maintenant\n\n"
-        "<code>/ssh_create &lt;user&gt; &lt;days&gt;</code>\n"
-        "<code>/ssh_list</code> — comptes SSH\n"
-        "<code>/ssh_delete &lt;user&gt;</code>\n\n"
-        "<code>/vless_create &lt;user&gt; &lt;days&gt;</code>\n"
-        "<code>/vmess_create &lt;user&gt; &lt;days&gt;</code>\n"
-        "<code>/trojan_create &lt;user&gt; &lt;days&gt;</code>\n"
-        "<code>/xray_list</code> — comptes XRAY\n\n"
-        "<code>/zivpn_create &lt;user&gt; &lt;pass&gt; &lt;days&gt;</code>\n"
-        "<code>/zivpn_list</code> — comptes ZIVPN\n"
-        "<code>/zivpn_delete &lt;user&gt;</code>"
-    )
-    if MENU_IMAGE_FILE.is_file():
-        try:
-            with MENU_IMAGE_FILE.open("rb") as photo:
-                bot.send_photo(chat_id, photo, caption=caption)
-            return
-        except Exception:
-            logger.exception("Impossible d'afficher l'image de menu %s", MENU_IMAGE_FILE)
-    bot.send_message(chat_id, caption)
+def add_role(role: str, uid: int) -> bool:
+    with state_lock:
+        state = load_state()
+        roles = state.setdefault("telegram_roles", {"admin": [], "reseller": []})
+        values = roles.setdefault(role, [])
+        values = [int(value) for value in values if str(value).isdigit()]
+        if uid == SUPER_ADMIN or uid in values:
+            return False
+        values.append(uid)
+        roles[role] = sorted(set(values))
+        save_state(state)
+    return True
 
 
-# ─── SSH helpers ───────────────────���───────────────────────────────────────────
+def remove_role(role: str, uid: int) -> bool:
+    with state_lock:
+        state = load_state()
+        roles = state.setdefault("telegram_roles", {"admin": [], "reseller": []})
+        values = roles.get(role, [])
+        updated = [int(value) for value in values if str(value).isdigit() and int(value) != uid]
+        if len(updated) == len(values):
+            return False
+        roles[role] = updated
+        save_state(state)
+    return True
 
 
-def create_ssh_account(username: str, password: str, days: int) -> tuple[bool, str]:
-    if not re.match(r"^[a-zA-Z0-9_]{1,32}$", username):
-        return False, "❌ Nom d'utilisateur invalide. Lettres, chiffres, underscore uniquement."
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
-    if subprocess.run(["id", username], capture_output=True, check=False).returncode == 0:
-        return False, f"❌ L'utilisateur <code>{username}</code> existe déjà."
+def actor_name(message: Any) -> str:
+    user = message.from_user
+    return " ".join(part for part in (user.first_name, user.last_name) if part) or user.username or str(user.id)
 
-    exp_date = _run(f"date -d '+{days} days' +%Y-%m-%d").strip()
-    r = subprocess.run(["useradd", "-e", exp_date, "-s", "/bin/false", "-M", username], capture_output=True)
-    if r.returncode != 0:
-        return False, f"❌ Erreur useradd: {r.stderr.decode().strip() or 'inconnue'}"
-    subprocess.run(["chpasswd"], input=f"{username}:{password}", text=True, capture_output=True)
 
-    domain = _run("cat /etc/xray/domain 2>/dev/null || echo 'N/A'")
-    ip = _run("curl -s4 https://ipv4.icanhazip.com 2>/dev/null || echo 'N/A'")
-    dns = _run("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'")
-    pub = _run("cat /etc/slowdns/server.pub 2>/dev/null || echo 'N/A'")
-    return True, (
-        f"✅ <b>Compte SSH Créé</b>\n\n"
-        f"👤 Utilisateur : <code>{username}</code>\n"
-        f"🔑 Mot de passe: <code>{password}</code>\n"
-        f"📅 Expiration  : <code>{exp_date}</code>\n"
-        f"🌐 Domaine     : <code>{domain}</code>\n"
-        f"📡 IP          : <code>{ip}</code>\n"
-        f"🔗 NS Domaine  : <code>{dns}</code>\n\n"
-        f"<b>Ports:</b>\n"
-        f"• OpenSSH: 22\n"
-        f"• Dropbear: 109, 143\n"
-        f"• Stunnel: 447, 777\n"
-        f"• WS TLS: 443 / NTLS: 80, 8880\n"
-        f"• UDPGW: 7100–7900\n\n"
-        f"<b>UDP Custom:</b>\n<code>{domain}:1-65535@{username}:{password}</code>\n\n"
-        f"<b>Slow DNS PUB:</b>\n<code>{pub}</code>"
+def audit_creation(message: Any, protocol: str, username: str, expiry: str) -> None:
+    role = role_for(message.from_user.id) or "inconnu"
+    now = datetime.now().astimezone()
+    notify_super(
+        "🆕 <b>Compte VPN créé</b>\n"
+        f"👤 Auteur : <code>{escaped(actor_name(message))}</code> (ID <code>{message.from_user.id}</code>, {escaped(role)})\n"
+        f"⚙️ Protocole : <code>{escaped(protocol.upper())}</code>\n"
+        f"🧾 Compte : <code>{escaped(username)}</code>\n"
+        f"📅 Expiration : <code>{escaped(expiry)}</code>\n"
+        f"🕒 Création : <code>{now:%d/%m/%Y %H:%M:%S %Z}</code>"
     )
 
 
-def renew_ssh_account(username: str, days: int) -> tuple[bool, str]:
-    if subprocess.run(["id", username], capture_output=True, check=False).returncode != 0:
-        return False, f"❌ L'utilisateur <code>{username}</code> n'existe pas."
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
+def ssh_create(username: str, days: int) -> tuple[bool, str, str]:
+    if not USERNAME_RE.fullmatch(username):
+        return False, "Nom d'utilisateur invalide.", ""
+    if run(["id", username]).returncode == 0:
+        return False, f"L'utilisateur {username} existe déjà.", ""
+    password = secrets.token_urlsafe(12)
+    exp = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    result = run(["useradd", "-e", exp, "-s", "/bin/false", "-M", username])
+    if result.returncode:
+        return False, result.stderr.strip() or "Échec de useradd.", ""
+    passwd = run(["chpasswd"], timeout=10) if False else subprocess.run(["chpasswd"], input=f"{username}:{password}\n", capture_output=True, text=True)
+    if passwd.returncode:
+        run(["userdel", "-r", username])
+        return False, passwd.stderr.strip() or "Échec de définition du mot de passe.", ""
+    return True, f"✅ SSH créé : <code>{escaped(username)}</code>, mot de passe <code>{escaped(password)}</code>, expiration <code>{exp}</code>.", exp
 
-    current_exp = _run(f"chage -l {username} | grep 'Account expires' | awk -F': ' '{{print $2}}'")
-    if current_exp == "never":
-        old = _run("date +%s")
+
+def ssh_delete(username: str) -> tuple[bool, str]:
+    if not USERNAME_RE.fullmatch(username):
+        return False, "Nom d'utilisateur invalide."
+    result = run(["userdel", "-r", username])
+    if result.returncode:
+        return False, result.stderr.strip() or "Suppression impossible ou compte introuvable."
+    return True, f"🗑 Compte SSH <code>{escaped(username)}</code> supprimé."
+
+
+def xray_add(protocol: str, username: str, days: int) -> tuple[bool, str, str]:
+    protocol = protocol.lower()
+    if protocol not in {"vless", "vmess", "trojan"} or not USERNAME_RE.fullmatch(username):
+        return False, "Protocole ou nom d'utilisateur invalide.", ""
+    path = Path(XRAY_CONFIG)
+    try:
+        original = path.read_text(encoding="utf-8")
+        data = json.loads(original)
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"Lecture de la configuration Xray impossible : {exc}", ""
+    inbound = next((item for item in data.get("inbounds", []) if item.get("protocol", "").lower() == protocol), None)
+    if inbound is None:
+        return False, f"Aucun inbound {protocol.upper()} trouvé.", ""
+    clients = inbound.setdefault("settings", {}).setdefault("clients", [])
+    if any(client.get("email") == username for client in clients):
+        return False, "Ce compte existe déjà.", ""
+    user_uuid = str(uuid.uuid4())
+    client = {"id": user_uuid, "email": username} if protocol != "trojan" else {"password": secrets.token_urlsafe(18), "email": username}
+    expiry = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    client["expiryDate"] = expiry
+    clients.append(client)
+    try:
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temp, path.stat().st_mode & 0o777)
+        os.replace(temp, path)
+    except OSError as exc:
+        return False, f"Écriture de la configuration impossible : {exc}", ""
+    restarted = run(["systemctl", "restart", "xray"])
+    if restarted.returncode:
+        return False, f"Le compte a été écrit mais le redémarrage Xray a échoué : {restarted.stderr.strip()}", expiry
+    cred = client.get("password", user_uuid)
+    return True, f"✅ {protocol.upper()} créé : <code>{escaped(username)}</code>, identifiant <code>{escaped(cred)}</code>, expiration <code>{expiry}</code>.", expiry
+
+
+def xray_delete(protocol: str, username: str) -> tuple[bool, str]:
+    protocol = protocol.lower()
+    if protocol not in {"vless", "vmess", "trojan"} or not USERNAME_RE.fullmatch(username):
+        return False, "Protocole ou nom d'utilisateur invalide."
+    path = Path(XRAY_CONFIG)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"Lecture Xray impossible : {exc}"
+    inbound = next((item for item in data.get("inbounds", []) if item.get("protocol", "").lower() == protocol), None)
+    if inbound is None:
+        return False, f"Inbound {protocol.upper()} introuvable."
+    clients = inbound.setdefault("settings", {}).setdefault("clients", [])
+    remaining_clients = [client for client in clients if client.get("email") != username]
+    if len(remaining_clients) == len(clients):
+        return False, "Compte introuvable."
+    inbound["settings"]["clients"] = remaining_clients
+    try:
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temp, path.stat().st_mode & 0o777)
+        os.replace(temp, path)
+    except OSError as exc:
+        return False, f"Écriture Xray impossible : {exc}"
+    restarted = run(["systemctl", "restart", "xray"])
+    if restarted.returncode:
+        return False, f"Configuration modifiée, mais redémarrage Xray échoué : {restarted.stderr.strip()}"
+    return True, f"🗑 Compte {protocol.upper()} <code>{escaped(username)}</code> supprimé."
+
+
+def zivpn_create(username: str, password: str, days: int) -> tuple[bool, str, str]:
+    if not USERNAME_RE.fullmatch(username) or not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", password):
+        return False, "Nom ou mot de passe invalide.", ""
+    path = Path(ZIVPN_DB)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        if any(line.split(":", 1)[0] == username for line in lines):
+            return False, "Ce compte existe déjà.", ""
+        expiry = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{username}:{password}:{expiry}\n")
+    except OSError as exc:
+        return False, f"Écriture ZIVPN impossible : {exc}", ""
+    restarted = run(["systemctl", "restart", "zivpn"])
+    if restarted.returncode:
+        return False, f"Compte écrit, mais redémarrage ZIVPN échoué : {restarted.stderr.strip()}", expiry
+    return True, f"✅ ZIVPN créé : <code>{escaped(username)}</code>, expiration <code>{expiry}</code>.", expiry
+
+
+def delete_zivpn(username: str) -> tuple[bool, str]:
+    if not USERNAME_RE.fullmatch(username):
+        return False, "Nom d'utilisateur invalide."
+    path = Path(ZIVPN_DB)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        updated = [line for line in lines if line.split(":", 1)[0] != username]
+        if len(updated) == len(lines):
+            return False, "Compte introuvable."
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text("\n".join(updated) + ("\n" if updated else ""), encoding="utf-8")
+        os.chmod(temp, path.stat().st_mode & 0o777)
+        os.replace(temp, path)
+    except OSError as exc:
+        return False, f"Écriture ZIVPN impossible : {exc}"
+    restarted = run(["systemctl", "restart", "zivpn"])
+    if restarted.returncode:
+        return False, f"Configuration modifiée, mais redémarrage ZIVPN échoué : {restarted.stderr.strip()}"
+    return True, f"🗑 Compte ZIVPN <code>{escaped(username)}</code> supprimé."
+
+
+def create_account(message: Any, protocol: str, username: str, days: int, password: str | None = None) -> None:
+    if protocol == "ssh":
+        ok, text, expiry = ssh_create(username, days)
+    elif protocol in {"vless", "vmess", "trojan"}:
+        ok, text, expiry = xray_add(protocol, username, days)
+    elif protocol == "zivpn":
+        ok, text, expiry = zivpn_create(username, password or secrets.token_urlsafe(12), days)
     else:
-        old = _run(f"date -d '{current_exp} +1 day' +%s")
-    new_ts = int(old) + int(days) * 86400
-    new_exp = _run(f"date --date='1970-01-01 {new_ts} sec' +%Y-%m-%d")
-    _run(f"usermod -e {new_exp} {username}")
-    _run(f"passwd -u {username}")
-    return True, (
-        f"🔄 <b>Compte SSH Renouvelé</b>\n\n"
-        f"👤 Utilisateur      : <code>{username}</code>\n"
-        f"📅 Ancienne exp.    : <code>{current_exp}</code>\n"
-        f"➕ Jours ajoutés   : {days}\n"
-        f"📅 Nouvelle exp.    : <code>{new_exp}</code>"
+        bot.reply_to(message, "Protocole non pris en charge.")
+        return
+    bot.reply_to(message, text)
+    if ok:
+        audit_creation(message, protocol, username, expiry)
+
+
+def start_text(message: Any) -> str:
+    return (
+        "🛡 <b>Thes — Surveillance et comptes VPN</b>\n\n"
+        "<code>/resellers</code>, <code>/status</code>, <code>/check</code> — surveillance\n"
+        "Création : <code>/ssh_create user jours</code>, <code>/vless_create user jours</code>,\n"
+        "<code>/vmess_create user jours</code>, <code>/trojan_create user jours</code>,\n"
+        "<code>/zivpn_create user motdepasse jours</code>\n"
+        "Suppression : <code>/ssh_delete user</code>, <code>/xray_delete protocole user</code>,\n"
+        "<code>/zivpn_delete user</code>\n"
+        "Consultation et renouvellement : réservés au super administrateur.\n"
+        "Gestion des rôles : <code>/admin_add id</code>, <code>/admin_remove id</code>,\n"
+        "<code>/reseller_add id</code>, <code>/reseller_remove id</code>, <code>/roles</code> (super admin)."
     )
 
 
-def delete_ssh_account(username: str) -> tuple[bool, str]:
-    _run(f"pkill -u {username}")
-    r = subprocess.run(["userdel", "-r", username], capture_output=True)
-    if r.returncode == 0:
-        return True, f"🗑️ <b>Compte SSH supprimé:</b> <code>{username}</code>"
-    return False, f"❌ Erreur: {r.stderr.decode().strip() or 'inconnue'}"
-
-
-def list_ssh_accounts() -> str:
-    out = _run("awk -F: '$3>=1000 && $1!=\"nobody\" {print $1}' /etc/passwd")
-    users = [u for u in out.splitlines() if u.strip()]
-    if not users:
-        return "📋 <b>Comptes SSH</b>\n\nAucun compte trouvé."
-    lines = ["📋 <b>Comptes SSH</b>"]
-    for user in users:
-        lines.append(f"• <code>{user}</code>")
-    return "\n".join(lines)
-
-
-def get_expiring_ssh(hours: int = 24) -> list[str]:
-    users = [u for u in list_ssh_accounts().splitlines() if u.strip().startswith("•")]
-    if not users:
-        return []
-    out = []
-    now = int(_run("date +%s"))
-    for user in [line.split("<code>", 1)[1].split("</code>", 1)[0] for line in users if "<code>" in line]:
-        chage_out = _run(f"chage -l {user}")
-        match = re.search(r"Account expires\s*:\s*(.*)", chage_out)
-        if not match:
-            continue
-        raw = match.group(1).strip()
-        if raw in ("never", "Never"):
-            continue
-        try:
-            ts = int(_run(f"date -d '{raw}' +%s"))
-            delta = ts - now
-            if 0 <= delta <= int(hours) * 3600:
-                out.append(user)
-        except Exception:
-            continue
-    return out
-
-
-# ─── XRAY helpers ──────────────────────────────────────────────────────────────
-
-
-def create_xray_account(protocol: str, username: str, days: int) -> tuple[bool, str]:
-    proto = protocol.lower()
-    if proto not in {"vless", "vmess", "trojan"}:
-        return False, "❌ Protocole XRAY invalide. Utilisez vless, vmess ou trojan."
-    if not re.match(r"^[a-zA-Z0-9_]{1,32}$", username):
-        return False, "❌ Nom d'utilisateur invalide."
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
-    if not os.path.exists(XRAY_CONFIG):
-        return False, f"❌ Fichier XRAY introuvable : {XRAY_CONFIG}"
-
-    existing = _run(f"grep -w '{username}' {XRAY_CONFIG} | wc -l")
-    if int(existing or 0) > 0:
-        return False, f"❌ L'utilisateur <code>{username}</code> existe déjà en {proto.upper()}."
-
-    uid = str(uuid.uuid4())
-    exp = _run(f"date -d '+{days} days' +%Y-%m-%d").strip()
-    domain = _run("cat /etc/xray/domain 2>/dev/null || echo 'N/A'").strip()
-
-    _run(
-        f"sed -i '/#{proto}$/a\\#& {username} {exp} {uid}\\n"
-        f",{{\"id\": \"{uid}\",\"email\": \"{username}\"' {XRAY_CONFIG} && systemctl restart xray"
-    )
-
-    if proto == "vless":
-        link_tls = f"vless://{uid}@{domain}:443?path=/vless&security=tls&encryption=none&type=ws#{username}"
-        link_ntls = f"vless://{uid}@{domain}:80?path=/vless&encryption=none&type=ws#{username}"
-        links = f"TLS : <code>{link_tls}</code>\n\nNTLS: <code>{link_ntls}</code>"
-    elif proto == "vmess":
-        vmess_obj = json.dumps({
-            "v": "2", "ps": username, "add": domain, "port": "443", "id": uid,
-            "aid": "0", "net": "ws", "type": "none", "host": domain,
-            "path": "/vmess", "tls": "tls"
-        })
-        link = "vmess://" + base64.b64encode(vmess_obj.encode()).decode()
-        links = f"<code>{link}</code>"
-    else:
-        link_tls = f"trojan://{uid}@{domain}:443?type=ws&host={domain}&path=/trojan#{username}"
-        links = f"TLS : <code>{link_tls}</code>"
-
-    return True, (
-        f"✅ <b>Compte {proto.upper()} Créé</b>\n\n"
-        f"👤 Utilisateur : <code>{username}</code>\n"
-        f"🔑 UUID        : <code>{uid}</code>\n"
-        f"📅 Expiration  : <code>{exp}</code>\n"
-        f"🌐 Domaine     : <code>{domain}</code>\n\n"
-        f"<b>Liens de connexion:</b>\n{links}"
-    )
-
-
-def renew_xray_account(protocol: str, username: str, days: int) -> tuple[bool, str]:
-    proto = protocol.lower()
-    if proto not in {"vless", "vmess", "trojan"}:
-        return False, "❌ Protocole XRAY invalide."
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
-    old_exp = _run(f"grep -E '^#& {username} ' {XRAY_CONFIG} | awk '{{print $3}}' | sort -u | head -1").strip()
-    if not old_exp:
-        return False, f"❌ Utilisateur <code>{username}</code> introuvable en {proto.upper()}."
-    uid = _run(f"grep -E '^#& {username} ' {XRAY_CONFIG} | awk '{{print $4}}' | sort -u | head -1").strip()
-    today = _run("date +%Y-%m-%d").strip()
-    d1 = int(_run(f"date -d '{old_exp}' +%s"))
-    d2 = int(_run(f"date -d '{today}' +%s"))
-    remaining = max(0, (d1 - d2) // 86400)
-    new_total = remaining + int(days)
-    new_exp = _run(f"date -d '+{new_total} days' +%Y-%m-%d").strip()
-    _run(f"sed -i '/^#& {username} /c\\#& {username} {new_exp} {uid}' {XRAY_CONFIG} && systemctl restart xray")
-    return True, (
-        f"🔄 <b>{proto.upper()} Renouvelé</b>\n\n"
-        f"👤 Utilisateur   : <code>{username}</code>\n"
-        f"📅 Ancienne exp. : <code>{old_exp}</code>\n"
-        f"➕ Jours ajoutés : {days}\n"
-        f"📅 Nouvelle exp. : <code>{new_exp}</code>"
-    )
-
-
-def delete_xray_account(protocol: str, username: str) -> tuple[bool, str]:
-    proto = protocol.lower()
-    _run(f"sed -i '/^#& {username} /d; /\"email\": \"{username}\"/d' {XRAY_CONFIG} && systemctl restart xray")
-    return True, f"🗑️ <b>Compte {proto.upper()} supprimé:</b> <code>{username}</code>"
-
-
-def list_xray_accounts() -> str:
-    out = _run(f"grep '^#& ' {XRAY_CONFIG} || true")
-    if not out:
-        return "📋 <b>Comptes XRAY</b>\n\nAucun compte trouvé."
-    lines = ["📋 <b>Comptes XRAY</b>"]
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 4:
-            lines.append(f"• <code>{parts[1]}</code> — exp: <code>{parts[2]}</code>")
-    return "\n".join(lines)
-
-
-# ─── ZIVPN helpers ──────────────────────────────────────────────────────────────
-
-
-def create_zivpn_account(username: str, password: str, days: int) -> tuple[bool, str]:
-    if not re.match(r"^[a-zA-Z0-9_]{1,32}$", username):
-        return False, "❌ Nom d'utilisateur invalide."
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
-    exp = _run(f"date -d '+{days} days' +%Y-%m-%d").strip()
-    _run(f"echo '{username}:{password}:{exp}' >> {ZIVPN_DB} && systemctl restart zivpn")
-    return True, (
-        f"✅ <b>Compte ZIVPN Créé</b>\n\n"
-        f"👤 Utilisateur : <code>{username}</code>\n"
-        f"🔑 Mot de passe: <code>{password}</code>\n"
-        f"📅 Expiration  : <code>{exp}</code>"
-    )
-
-
-def renew_zivpn_account(username: str, days: int) -> tuple[bool, str]:
-    if not str(days).isdigit():
-        return False, "❌ Nombre de jours invalide."
-    _run(f"sed -i '/^{username}:/d' {ZIVPN_DB}")
-    exp = _run(f"date -d '+{days} days' +%Y-%m-%d").strip()
-    password = "renouvele"
-    _run(f"echo '{username}:{password}:{exp}' >> {ZIVPN_DB} && systemctl restart zivpn")
-    return True, f"🔄 Compte ZIVPN <code>{username}</code> renouvelé jusqu'au <code>{exp}</code>."
-
-
-def delete_zivpn_account(username: str) -> tuple[bool, str]:
-    _run(f"sed -i '/^{username}:/d' {ZIVPN_DB} && systemctl restart zivpn")
-    return True, f"🗑️ Compte ZIVPN <code>{username}</code> supprimé."
-
-
-def list_zivpn_accounts() -> str:
-    if not os.path.exists(ZIVPN_DB):
-        return "📋 <b>Comptes ZIVPN</b>\n\nAucun compte trouvé."
-    out = _run(f"cat {ZIVPN_DB} 2>/dev/null || true")
-    if not out.strip():
-        return "📋 <b>Comptes ZIVPN</b>\n\nAucun compte trouvé."
-    lines = ["📋 <b>Comptes ZIVPN</b>"]
-    for line in out.splitlines():
-        user = line.split(":", 1)[0] if line else ""
-        if user:
-            lines.append(f"• <code>{user}</code>")
-    return "\n".join(lines)
-
-
-# ─── Telegram command handlers ───────────────────────────────────────────────────
+def menu_keyboard(uid: int) -> types.InlineKeyboardMarkup:
+    role = role_for(uid)
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(types.InlineKeyboardButton("🛡 Surveillance", callback_data="monitor"))
+    if role in {"super_admin", "admin"}:
+        kb.add(types.InlineKeyboardButton("➕ Créer SSH", callback_data="hint_ssh_create"),
+               types.InlineKeyboardButton("🗑 Supprimer SSH", callback_data="hint_ssh_delete"))
+        kb.add(types.InlineKeyboardButton("⚡ Créer XRAY", callback_data="hint_xray_create"),
+               types.InlineKeyboardButton("🗑 Supprimer XRAY", callback_data="hint_xray_delete"))
+        kb.add(types.InlineKeyboardButton("🌐 Créer ZIVPN", callback_data="hint_zivpn_create"),
+               types.InlineKeyboardButton("🗑 Supprimer ZIVPN", callback_data="hint_zivpn_delete"))
+    elif role == "reseller":
+        kb.add(types.InlineKeyboardButton("➕ Créer SSH", callback_data="hint_ssh_create"),
+               types.InlineKeyboardButton("⚡ Créer XRAY", callback_data="hint_xray_create"))
+        kb.add(types.InlineKeyboardButton("🌐 Créer ZIVPN", callback_data="hint_zivpn_create"))
+    if role == "super_admin":
+        kb.add(types.InlineKeyboardButton("📋 Comptes", callback_data="accounts"),
+               types.InlineKeyboardButton("👥 Rôles", callback_data="roles"))
+    return kb
 
 
 @bot.message_handler(commands=["start", "help", "menu"])
 def start(message: Any) -> None:
-    if not authorized(message):
+    if role_for(message.from_user.id) is None:
+        bot.reply_to(message, "⛔ Accès refusé.")
         return
-    show_menu(message.chat.id)
+    bot.send_message(message.chat.id, start_text(message), reply_markup=menu_keyboard(message.from_user.id))
 
 
 @bot.message_handler(commands=["resellers"])
-def list_resellers(message: Any) -> None:
-    if not authorized(message):
-        return
+def reseller_subscriptions(message: Any) -> None:
+    if role_for(message.from_user.id) is None:
+        bot.reply_to(message, "⛔ Accès refusé."); return
     rows, now = scan_resellers(), datetime.now()
-    lines = ["👥 <b>Surveillance des revendeurs</b>"]
+    lines = ["👥 <b>Surveillance des abonnements revendeurs</b>"]
     for rid, info, expiry in rows:
-        exp_text = "échéance inconnue" if expiry is None else f"{remaining(expiry, now)} — {expiry:%d/%m/%Y %H:%M}"
-        lines.append(f"• {label(rid, info)}\n  ⏳ {escaped(exp_text)}")
-    if not rows:
-        lines.append("Aucun revendeur enregistré.")
-    chunk = ""
-    for line in lines:
-        if len(chunk) + len(line) > 3500:
-            bot.send_message(message.chat.id, chunk)
-            chunk = ""
-        chunk += line + "\n"
-    if chunk:
-        bot.send_message(message.chat.id, chunk)
+        value = "échéance inconnue" if expiry is None else f"{remaining(expiry, now)} — {expiry:%d/%m/%Y %H:%M}"
+        lines.append(f"• {reseller_label(rid, info)}\n  ⏳ {escaped(value)}")
+    bot.send_message(message.chat.id, "\n".join(lines) if rows else "Aucun revendeur enregistré.")
 
 
 @bot.message_handler(commands=["status"])
 def status(message: Any) -> None:
-    if not authorized(message):
-        return
+    if role_for(message.from_user.id) is None:
+        bot.reply_to(message, "⛔ Accès refusé."); return
     rows, now = scan_resellers(), datetime.now()
-    expired = sum(1 for _, _, exp in rows if exp is not None and exp <= now)
-    soon = sum(1 for _, _, exp in rows if exp is not None and now < exp <= now + timedelta(hours=24))
-    unknown = sum(1 for _, _, exp in rows if exp is None)
-    bot.send_message(
-        message.chat.id,
-        f"📊 <b>État de la surveillance</b>\n\n"
-        f"👥 Revendeurs : <b>{len(rows)}</b>\n"
-        f"⚠️ Échéance sous 24 h : <b>{soon}</b>\n"
-        f"⛔ Expirés : <b>{expired}</b>\n"
-        f"❓ Échéance inconnue : <b>{unknown}</b>\n\n"
-        f"<b>Comptes actifs:</b> SSH, VLESS, VMess, Trojan et ZIVPN via commandes dédiées."
-    )
+    expired = sum(1 for _, _, exp in rows if exp and exp <= now)
+    soon = sum(1 for _, _, exp in rows if exp and now < exp <= now + timedelta(hours=24))
+    bot.send_message(message.chat.id, f"📊 Revendeurs suivis : <b>{len(rows)}</b>\n⚠️ Échéance sous 24 h : <b>{soon}</b>\n⛔ Expirés : <b>{expired}</b>")
 
 
 @bot.message_handler(commands=["check"])
 def check_now(message: Any) -> None:
-    if not authorized(message):
-        return
-    rows = scan_resellers()
-    bot.send_message(message.chat.id, f"✅ Vérification terminée : {len(rows)} revendeur(s) contrôlé(s).")
+    if role_for(message.from_user.id) is None:
+        bot.reply_to(message, "⛔ Accès refusé."); return
+    bot.reply_to(message, f"✅ Vérification terminée : {len(scan_resellers())} revendeur(s) contrôlé(s).")
 
 
-@bot.message_handler(commands=["ssh_create"])
-def ssh_create_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
+@bot.message_handler(commands=["admin_add", "admin_remove", "reseller_add", "reseller_remove", "roles"])
+def manage_roles(message: Any) -> None:
+    if not is_super(message.from_user.id):
+        bot.reply_to(message, "⛔ Seul le super administrateur peut gérer les rôles."); return
     parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /ssh_create <username> <jours>")
+    command = parts[0].split("@", 1)[0].lstrip("/")
+    if command == "roles":
+        state = load_state().get("telegram_roles", {})
+        admins = sorted(get_role_ids("admin"))
+        resellers = sorted(get_role_ids("reseller"))
+        bot.reply_to(message, f"👥 <b>Rôles</b>\nAdministrateurs : <code>{escaped(admins)}</code>\nRevendeurs : <code>{escaped(resellers)}</code>")
         return
-    username, days = parts[1], int(parts[2])
-    password = secrets.token_urlsafe(12)
-    ok, reply = create_ssh_account(username, password, days)
-    bot.reply_to(message, reply if ok else reply)
+    if len(parts) != 2 or not parts[1].isdigit():
+        bot.reply_to(message, f"Usage: /{command} <telegram_id>"); return
+    uid = int(parts[1])
+    role = "admin" if command.startswith("admin_") else "reseller"
+    changed = add_role(role, uid) if command.endswith("add") else remove_role(role, uid)
+    bot.reply_to(message, f"✅ Rôle {role} mis à jour pour <code>{uid}</code>." if changed else "ℹ️ Aucun changement (ID déjà présent/absent ou super administrateur).")
 
 
-@bot.message_handler(commands=["ssh_list"])
-def ssh_list_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    bot.reply_to(message, list_ssh_accounts())
-
-
-@bot.message_handler(commands=["ssh_delete"])
-def ssh_delete_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
+@bot.message_handler(commands=["ssh_create", "vless_create", "vmess_create", "trojan_create"])
+def create_simple_account(message: Any) -> None:
+    role = role_for(message.from_user.id)
+    if role not in {"super_admin", "admin", "reseller"}:
+        bot.reply_to(message, "⛔ Accès refusé."); return
     parts = message.text.split()
-    if len(parts) < 2:
-        bot.reply_to(message, "Usage: /ssh_delete <username>")
-        return
-    ok, reply = delete_ssh_account(parts[1])
-    bot.reply_to(message, reply)
-
-
-@bot.message_handler(commands=["ssh_renew"])
-def ssh_renew_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /ssh_renew <username> <jours>")
-        return
-    ok, reply = renew_ssh_account(parts[1], int(parts[2]))
-    bot.reply_to(message, reply)
-
-
-@bot.message_handler(commands=["vless_create", "vmess_create", "trojan_create"])
-def xray_create_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    cmd = message.text.split()[0][1:]
-    protocol = cmd.replace("_create", "")
-    parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, f"Usage: /{cmd} <username> <jours>")
-        return
-    ok, reply = create_xray_account(protocol, parts[1], int(parts[2]))
-    bot.reply_to(message, reply)
-
-
-@bot.message_handler(commands=["xray_list"])
-def xray_list_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    bot.reply_to(message, list_xray_accounts())
-
-
-@bot.message_handler(commands=["xray_delete"])
-def xray_delete_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /xray_delete <vless|vmess|trojan> <username>")
-        return
-    proto, username = parts[1], parts[2]
-    ok, reply = delete_xray_account(proto, username)
-    bot.reply_to(message, reply)
-
-
-@bot.message_handler(commands=["xray_renew"])
-def xray_renew_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    parts = message.text.split()
-    if len(parts) < 4:
-        bot.reply_to(message, "Usage: /xray_renew <vless|vmess|trojan> <username> <jours>")
-        return
-    proto, username, days = parts[1], parts[2], int(parts[3])
-    ok, reply = renew_xray_account(proto, username, days)
-    bot.reply_to(message, reply)
+    protocol = parts[0].split("@", 1)[0].lstrip("/").replace("_create", "")
+    if len(parts) != 3:
+        bot.reply_to(message, f"Usage: /{protocol}_create <username> <jours>"); return
+    days = parse_days(parts[2])
+    if days is None:
+        bot.reply_to(message, "Nombre de jours invalide (1–3650)."); return
+    create_account(message, protocol, parts[1], days)
 
 
 @bot.message_handler(commands=["zivpn_create"])
-def zivpn_create_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
+def create_zivpn(message: Any) -> None:
+    if role_for(message.from_user.id) not in {"super_admin", "admin", "reseller"}:
+        bot.reply_to(message, "⛔ Accès refusé."); return
     parts = message.text.split()
-    if len(parts) < 4:
-        bot.reply_to(message, "Usage: /zivpn_create <username> <password> <jours>")
-        return
-    ok, reply = create_zivpn_account(parts[1], parts[2], int(parts[3]))
-    bot.reply_to(message, reply)
+    if len(parts) != 4:
+        bot.reply_to(message, "Usage: /zivpn_create <username> <password> <jours>"); return
+    days = parse_days(parts[3])
+    if days is None:
+        bot.reply_to(message, "Nombre de jours invalide (1–3650)."); return
+    create_account(message, "zivpn", parts[1], days, parts[2])
 
 
-@bot.message_handler(commands=["zivpn_list"])
-def zivpn_list_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
-    bot.reply_to(message, list_zivpn_accounts())
-
-
-@bot.message_handler(commands=["zivpn_delete"])
-def zivpn_delete_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
+@bot.message_handler(commands=["ssh_delete", "zivpn_delete"])
+def delete_named_account(message: Any) -> None:
+    role = role_for(message.from_user.id)
+    command = message.text.split()[0].split("@", 1)[0].lstrip("/")
+    allowed = {"super_admin", "admin"} if role != "reseller" else set()
+    if role not in allowed:
+        bot.reply_to(message, "⛔ Les revendeurs ne peuvent pas supprimer de comptes."); return
     parts = message.text.split()
-    if len(parts) < 2:
-        bot.reply_to(message, "Usage: /zivpn_delete <username>")
-        return
-    ok, reply = delete_zivpn_account(parts[1])
-    bot.reply_to(message, reply)
+    if len(parts) != 2:
+        bot.reply_to(message, f"Usage: /{command} <username>"); return
+    ok, result = ssh_delete(parts[1]) if command == "ssh_delete" else delete_zivpn(parts[1])
+    bot.reply_to(message, result)
 
 
-@bot.message_handler(commands=["zivpn_renew"])
-def zivpn_renew_cmd(message: Any) -> None:
-    if not authorized(message):
-        return
+@bot.message_handler(commands=["xray_delete"])
+def delete_xray_command(message: Any) -> None:
+    role = role_for(message.from_user.id)
+    if role not in {"super_admin", "admin"}:
+        bot.reply_to(message, "⛔ Les revendeurs ne peuvent pas supprimer de comptes."); return
     parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /zivpn_renew <username> <jours>")
-        return
-    ok, reply = renew_zivpn_account(parts[1], int(parts[2]))
-    bot.reply_to(message, reply)
+    if len(parts) != 3:
+        bot.reply_to(message, "Usage: /xray_delete <vless|vmess|trojan> <username>"); return
+    ok, result = xray_delete(parts[1], parts[2])
+    bot.reply_to(message, result)
 
 
-# ─── Inline keyboard menus ─────────────────────────────────────────────────────
+@bot.message_handler(commands=["ssh_list", "xray_list", "zivpn_list", "accounts"])
+def list_accounts(message: Any) -> None:
+    if not is_super(message.from_user.id):
+        bot.reply_to(message, "⛔ Seul le super administrateur peut consulter les comptes."); return
+    command = message.text.split()[0].split("@", 1)[0].lstrip("/")
+    if command in {"ssh_list", "accounts"}:
+        result = run(["awk", "-F:", '$3>=1000 && $1!="nobody" {print $1}', "/etc/passwd"]).stdout.strip()
+        text = "📋 <b>Comptes SSH</b>\n" + ("\n".join(f"• <code>{escaped(item)}</code>" for item in result.splitlines()) or "Aucun")
+    elif command == "xray_list":
+        try:
+            data = json.loads(Path(XRAY_CONFIG).read_text(encoding="utf-8"))
+            rows = [f"• {escaped(inbound.get('protocol', '?'))}: <code>{escaped(client.get('email', '?'))}</code>" for inbound in data.get("inbounds", []) for client in inbound.get("settings", {}).get("clients", [])]
+            text = "📋 <b>Comptes XRAY</b>\n" + ("\n".join(rows) if rows else "Aucun")
+        except (OSError, json.JSONDecodeError) as exc:
+            text = f"Lecture XRAY impossible : {escaped(exc)}"
+    else:
+        try:
+            rows = [line.split(":", 1)[0] for line in Path(ZIVPN_DB).read_text(encoding="utf-8").splitlines() if ":" in line]
+            text = "📋 <b>Comptes ZIVPN</b>\n" + ("\n".join(f"• <code>{escaped(item)}</code>" for item in rows) or "Aucun")
+        except OSError as exc:
+            text = f"Lecture ZIVPN impossible : {escaped(exc)}"
+    bot.reply_to(message, text)
 
 
-def main_menu_keyboard() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("🛡 Surveillance", callback_data="menu_monitor"),
-        types.InlineKeyboardButton("👤 SSH", callback_data="menu_ssh"),
-        types.InlineKeyboardButton("⚡ XRAY", callback_data="menu_xray"),
-        types.InlineKeyboardButton("🌐 ZIVPN", callback_data="menu_zivpn"),
-    )
-    return kb
-
-
-def ssh_menu_keyboard() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("➕ Créer", callback_data="ssh_create_hint"),
-        types.InlineKeyboardButton("📋 Lister", callback_data="ssh_list"),
-        types.InlineKeyboardButton("🗑 Supprimer", callback_data="ssh_delete_hint"),
-        types.InlineKeyboardButton("🔄 Renouveler", callback_data="ssh_renew_hint"),
-        types.InlineKeyboardButton("◀ Retour", callback_data="main_menu"),
-    )
-    return kb
-
-
-def xray_menu_keyboard() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("➕ VLESS", callback_data="vless_create_hint"),
-        types.InlineKeyboardButton("➕ VMESS", callback_data="vmess_create_hint"),
-        types.InlineKeyboardButton("➕ Trojan", callback_data="trojan_create_hint"),
-        types.InlineKeyboardButton("📋 Lister", callback_data="xray_list"),
-        types.InlineKeyboardButton("🗑 Supprimer", callback_data="xray_delete_hint"),
-        types.InlineKeyboardButton("◀ Retour", callback_data="main_menu"),
-    )
-    return kb
-
-
-def zivpn_menu_keyboard() -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("➕ Créer", callback_data="zivpn_create_hint"),
-        types.InlineKeyboardButton("📋 Lister", callback_data="zivpn_list"),
-        types.InlineKeyboardButton("🗑 Supprimer", callback_data="zivpn_delete_hint"),
-        types.InlineKeyboardButton("🔄 Renouveler", callback_data="zivpn_renew_hint"),
-        types.InlineKeyboardButton("◀ Retour", callback_data="main_menu"),
-    )
-    return kb
+@bot.message_handler(commands=["ssh_renew", "xray_renew", "zivpn_renew"])
+def renewal_super_only(message: Any) -> None:
+    if not is_super(message.from_user.id):
+        bot.reply_to(message, "⛔ Le renouvellement est réservé au super administrateur."); return
+    bot.reply_to(message, "La commande de renouvellement doit être réalisée depuis le panneau super administrateur.")
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call: Any) -> None:
     uid = call.from_user.id
-    if not is_admin(uid):
+    if role_for(uid) is None:
         bot.answer_callback_query(call.id, "⛔ Accès refusé")
         return
     bot.answer_callback_query(call.id)
-
-    if call.data == "main_menu":
-        bot.edit_message_text(
-            "🛡 <b>Surveillance + Gestion VPN</b>\n\nChoisissez une action :",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=main_menu_keyboard(),
-        )
-    elif call.data == "menu_monitor":
-        bot.edit_message_text(
-            "🛡 <b>Surveillance des revendeurs</b>\n\n"
-            "<code>/resellers</code> — liste\n"
-            "<code>/status</code> — résumé\n"
-            "<code>/check</code> — vérification",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=main_menu_keyboard(),
-        )
-    elif call.data == "menu_ssh":
-        bot.edit_message_text(
-            "👤 <b>Gestion SSH</b>",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=ssh_menu_keyboard(),
-        )
-    elif call.data == "menu_xray":
-        bot.edit_message_text(
-            "⚡ <b>Gestion XRAY</b>",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=xray_menu_keyboard(),
-        )
-    elif call.data == "menu_zivpn":
-        bot.edit_message_text(
-            "🌐 <b>Gestion ZIVPN</b>",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=zivpn_menu_keyboard(),
-        )
-    elif call.data == "ssh_list":
-        bot.edit_message_text(list_ssh_accounts(), call.message.chat.id, call.message.message_id, reply_markup=ssh_menu_keyboard())
-    elif call.data == "ssh_create_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /ssh_create <username> <jours>")
-    elif call.data == "ssh_delete_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /ssh_delete <username>")
-    elif call.data == "ssh_renew_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /ssh_renew <username> <jours>")
-    elif call.data == "vless_create_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /vless_create <username> <jours>")
-    elif call.data == "vmess_create_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /vmess_create <username> <jours>")
-    elif call.data == "trojan_create_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /trojan_create <username> <jours>")
-    elif call.data == "xray_list":
-        bot.edit_message_text(list_xray_accounts(), call.message.chat.id, call.message.message_id, reply_markup=xray_menu_keyboard())
-    elif call.data == "xray_delete_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /xray_delete <vless|vmess|trojan> <username>")
-    elif call.data == "zivpn_list":
-        bot.edit_message_text(list_zivpn_accounts(), call.message.chat.id, call.message.message_id, reply_markup=zivpn_menu_keyboard())
-    elif call.data == "zivpn_create_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /zivpn_create <username> <password> <jours>")
-    elif call.data == "zivpn_delete_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /zivpn_delete <username>")
-    elif call.data == "zivpn_renew_hint":
-        bot.send_message(call.message.chat.id, "📝 Envoyer: /zivpn_renew <username> <jours>")
-
-
-# ─── Monitoring loop ────────────────────────────────────────────────────────────
+    if call.data == "monitor":
+        bot.send_message(call.message.chat.id, "🛡 Commandes : /resellers, /status, /check")
+    elif call.data == "accounts" and is_super(uid):
+        bot.send_message(call.message.chat.id, "📋 Commandes : /ssh_list, /xray_list, /zivpn_list")
+    elif call.data == "roles" and is_super(uid):
+        bot.send_message(call.message.chat.id, "👥 Commandes super admin : /admin_add ID, /admin_remove ID, /reseller_add ID, /reseller_remove ID, /roles")
+    elif call.data == "hint_ssh_create":
+        bot.send_message(call.message.chat.id, "Envoyer /ssh_create <username> <jours>")
+    elif call.data == "hint_ssh_delete" and role_for(uid) in {"super_admin", "admin"}:
+        bot.send_message(call.message.chat.id, "Envoyer /ssh_delete <username>")
+    elif call.data == "hint_xray_create":
+        bot.send_message(call.message.chat.id, "Envoyer /vless_create, /vmess_create ou /trojan_create <username> <jours>")
+    elif call.data == "hint_xray_delete" and role_for(uid) in {"super_admin", "admin"}:
+        bot.send_message(call.message.chat.id, "Envoyer /xray_delete <vless|vmess|trojan> <username>")
+    elif call.data == "hint_zivpn_create":
+        bot.send_message(call.message.chat.id, "Envoyer /zivpn_create <username> <password> <jours>")
+    elif call.data == "hint_zivpn_delete" and role_for(uid) in {"super_admin", "admin"}:
+        bot.send_message(call.message.chat.id, "Envoyer /zivpn_delete <username>")
 
 
 def monitor_loop() -> None:
@@ -827,6 +657,6 @@ def monitor_loop() -> None:
 
 if __name__ == "__main__":
     rows = scan_resellers(notify_changes=False)
-    send_admin(f"✅ Surveillance démarrée. {len(rows)} revendeur(s) suivis.")
+    notify_super(f"✅ Surveillance démarrée. {len(rows)} revendeur(s) suivis.")
     threading.Thread(target=monitor_loop, name="reseller-monitor", daemon=True).start()
     bot.infinity_polling(timeout=30, long_polling_timeout=15)
