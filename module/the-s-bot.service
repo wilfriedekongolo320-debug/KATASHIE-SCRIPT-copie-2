@@ -1,0 +1,35 @@
+[Unit]
+Description=THE_S Telegram Reseller Monitoring Bot (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=the-s-bot
+Group=the-s-bot
+Environment=THE_S_BOT_CONFIG=/etc/the_s_bot/config.json
+Environment=THE_S_BOT_RESELLERS=/etc/the_s_bot/resellers.json
+Environment=THE_S_BOT_STATE_FILE=/var/lib/the-s-bot/state.json
+WorkingDirectory=/etc/the_s_bot
+ExecStart=/opt/the-s-bot/venv/bin/python /etc/the_s_bot/Thes.py
+Restart=on-failure
+RestartSec=10
+StateDirectory=the-s-bot
+StateDirectoryMode=0750
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/the_s_bot
+
+[Install]
+WantedBy=multi-user.target
