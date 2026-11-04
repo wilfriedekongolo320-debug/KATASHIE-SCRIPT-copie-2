@@ -1,0 +1,4 @@
+{
+  "bot_token": "REPLACE_WITH_TELEGRAM_BOT_TOKEN",
+  "super_admin": 123456789
+}
