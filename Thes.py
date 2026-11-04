@@ -14,7 +14,7 @@ CONFIG_FILE    = '/etc/the_s_bot/config.json'
 RESELLERS_FILE = '/etc/the_s_bot/resellers.json'
 CONVS_FILE     = '/etc/the_s_bot/convs.json'
 VISITORS_FILE  = '/etc/the_s_bot/visitors.json'
-MENU_IMAGE_URL = "https://github.com/the_stech237/the_s-tg-bot/blob/main/the_s.jpg?raw=true"
+MENU_IMAGE_URL = ""
 
 def load_config():
     if not os.path.exists(CONFIG_FILE): return None
