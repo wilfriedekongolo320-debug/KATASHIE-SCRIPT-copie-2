@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installation du bot de surveillance uniquement. Le script télécharge les
-# fichiers nécessaires depuis GitHub, même s'il est lancé sans clone local.
+# Installation du bot Thes, téléchargeable même sans clone local.
 REPO="${THE_S_BOT_REPO:-wilfriedekongolo320-debug/KATASHIE-SCRIPT-copie-2}"
-REPO_REF="${THE_S_BOT_REF:-copilot/reseller-monitor-only}"
+REPO_REF="${THE_S_BOT_REF:-main}"
 RAW_BASE="${THE_S_BOT_RAW_BASE:-https://raw.githubusercontent.com/${REPO}/${REPO_REF}}"
 CONFIG_DIR="/etc/the_s_bot"
 CONFIG_FILE="$CONFIG_DIR/config.json"
