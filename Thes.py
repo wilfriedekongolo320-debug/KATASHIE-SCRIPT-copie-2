@@ -10,10 +10,11 @@ from datetime import datetime, timedelta
 from modules import system_core, ssh_core, admin_core, xray_core, zivpn_core
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s %(levelname)s %(message)s')
-CONFIG_FILE    = '/etc/pps_bot/config.json'
-RESELLERS_FILE = '/etc/pps_bot/resellers.json'
-CONVS_FILE     = '/etc/pps_bot/convs.json'
-VISITORS_FILE  = '/etc/pps_bot/visitors.json'
+CONFIG_DIR     = '/etc/the_s_bot'
+CONFIG_FILE    = f'{CONFIG_DIR}/config.json'
+RESELLERS_FILE = f'{CONFIG_DIR}/resellers.json'
+CONVS_FILE     = f'{CONFIG_DIR}/convs.json'
+VISITORS_FILE  = f'{CONFIG_DIR}/visitors.json'
 MENU_IMAGE_URL = ""
 
 def load_config():
@@ -581,7 +582,6 @@ def handle_owner_message(message):
 
 # ══════════════════════════════════════════
 #  GESTION REVENDEURS (bouton menu)
-#  CORRECTION : envoi en send_message au lieu de _show_submenu
 # ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_resellers" and is_admin(call.from_user.id))
 def menu_resellers(call):
@@ -603,8 +603,6 @@ def menu_resellers(call):
         f"✏️ /setmaxdays &lt;ID&gt; &lt;jours&gt;\n"
         f"⏳ /extendtrial &lt;ID&gt; &lt;heures&gt;"
     )
-    # On supprime l'ancien message et on envoie un nouveau
-    # pour éviter le bug d'édition sur les messages photo
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
@@ -970,9 +968,6 @@ def view_ssh_account(call):
     if not is_admin(call.from_user.id): return
     user = call.data[len("view_ssh_"):]
     ip, domain, _ = get_system_info()
-    #password = subprocess.getoutput(
-    #    f"grep '^{user}:' /etc/shadow 2>/dev/null | cut -d: -f2 || echo 'N/A'"
-    #).strip()
     password = "*******"
     expiry_raw = subprocess.getoutput(
         f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
@@ -1169,9 +1164,6 @@ def _slowdns_del_exec(message, creator_id):
     success, res = ssh_core.delete_ssh_account(user)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# ══════════════════════════════════════════
-#  SLOW DNS — LISTE + AFFICHAGE FORMAT COMPLET
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "list_slowdns")
 def list_slowdns(call):
     uid = call.from_user.id
@@ -1198,9 +1190,6 @@ def view_slowdns_account(call):
     user = call.data[len("view_slowdns_"):]
     ip, domain, slowdns_pub = get_system_info()
     ns_domain = subprocess.getoutput("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'").strip()
-    #password  = subprocess.getoutput(
-    #    f"grep '^{user}:' /etc/shadow 2>/dev/null | cut -d: -f2 || echo 'N/A'"
-    #).strip()
     password = "*******"
     expiry = subprocess.getoutput(
         f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
@@ -1395,9 +1384,6 @@ def _udpfast_del_exec(message, creator_id):
     success, res = ssh_core.delete_ssh_account(user)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# ══════════════════════════════════════════
-#  UDP FAST — LISTE + AFFICHAGE FORMAT COMPLET
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "list_udpfast")
 def list_udpfast(call):
     uid = call.from_user.id
@@ -1423,9 +1409,6 @@ def view_udpfast_account(call):
     if not is_admin(call.from_user.id): return
     user = call.data[len("view_udpfast_"):]
     ip, domain, _ = get_system_info()
-    #password = subprocess.getoutput(
-    #    f"grep '^{user}:' /etc/shadow 2>/dev/null | cut -d: -f2 || echo 'N/A'"
-    #).strip()
     password = "*******"
     expiry = subprocess.getoutput(
         f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
@@ -1941,7 +1924,7 @@ def handle_revoke_approval(call):
 #  LANCEMENT
 # ══════════════════════════════════════════
 if __name__ == "__main__":
-    os.makedirs("/etc/pps_bot", exist_ok=True)
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     if not os.path.exists(RESELLERS_FILE): save_resellers({})
     if not os.path.exists(CONVS_FILE):    save_convs({})
     if not os.path.exists(VISITORS_FILE): save_visitors({})
