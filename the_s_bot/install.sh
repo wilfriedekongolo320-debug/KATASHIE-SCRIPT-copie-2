@@ -19,37 +19,43 @@ fi
 
 echo "📦 Mise à jour du système et installation des dépendances..."
 apt-get update -y
-apt-get install -y ca-certificates curl python3 python3-venv python3-pip
+apt-get install -y ca-certificates curl cron python3 python3-venv python3-pip
 
 DOWNLOAD_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$DOWNLOAD_DIR"; }
 trap cleanup EXIT
 
-download_file() {
+# Télécharge un fichier du dépôt ; retourne 1 (sans quitter) s'il est indisponible
+# (dépôt privé, mauvaise branche...). Une valeur intégrée prend alors le relais.
+fetch_optional() {
   local remote_path="$1" destination="$2"
-  echo "📥 Téléchargement de ${remote_path}..."
-  curl --fail --location --silent --show-error --retry 3 \
-    "${RAW_BASE}/${remote_path}" -o "$destination"
-  test -s "$destination" || { echo "❌ Fichier téléchargé vide : ${remote_path}" >&2; exit 1; }
+  if curl --fail --location --silent --show-error --retry 2 \
+       "${RAW_BASE}/${remote_path}" -o "$destination" 2>/dev/null && [[ -s "$destination" ]]; then
+    echo "📥 ${remote_path} téléchargé."
+    return 0
+  fi
+  echo "ℹ️  ${remote_path} indisponible sur le dépôt — valeur intégrée utilisée."
+  return 1
 }
 
-# 1. Télécharger requirements.txt et le service systemd depuis le dépôt
-download_file "the_s_bot/requirements.txt" "$DOWNLOAD_DIR/requirements.txt"
-download_file "module/the-s-bot.service" "$DOWNLOAD_DIR/the-s-bot.service"
+# 1. requirements.txt (dépôt, sinon valeur intégrée)
+if ! fetch_optional "the_s_bot/requirements.txt" "$DOWNLOAD_DIR/requirements.txt"; then
+  printf 'pyTelegramBotAPI\n' > "$DOWNLOAD_DIR/requirements.txt"
+fi
 
 # 2. Création des dossiers nécessaires
-install -d -o root -g root -m 0750 "$CONFIG_DIR"
+install -d -o root -g root -m 0700 "$CONFIG_DIR"
+install -d -o root -g root -m 0700 "$CONFIG_DIR/modules"
 install -d -o root -g root -m 0755 "$APP_DIR"
 install -d -o root -g root -m 0755 /var/lib/the-s-bot
-
-# Copie des fichiers de configuration et requirements
 install -m 0644 "$DOWNLOAD_DIR/requirements.txt" "$CONFIG_DIR/requirements.txt"
 
-# 3. Création automatique et intégration directe du script Python (Thes.py) dans le dossier de config
+# 3. Script principal du bot (Thes.py)
 echo "⚙️ Écriture du fichier Thes.py..."
 cat << 'EOF' > "$CONFIG_DIR/Thes.py"
 import telebot
 import subprocess
+import shlex
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
@@ -304,7 +310,7 @@ def notify_owner_account_created(creator_id, proto, username, days, password="")
         pass
 
 def get_system_info():
-    ip          = subprocess.getoutput("curl -s ifconfig.me").strip()
+    ip          = subprocess.getoutput("curl -s -m 5 ifconfig.me").strip()
     domain      = subprocess.getoutput("cat /etc/xray/domain 2>/dev/null || echo 'N/A'").strip()
     slowdns_pub = subprocess.getoutput("cat /etc/slowdns/server.pub 2>/dev/null || echo 'N/A'").strip()
     return ip, domain, slowdns_pub
@@ -957,7 +963,7 @@ def view_ssh_account(call):
     ip, domain, _ = get_system_info()
     password = "*******"
     expiry_raw = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip()
     expiry = expiry_raw if expiry_raw else "N/A"
     details = (
@@ -1070,7 +1076,7 @@ def _slowdns_get_days(message, user, password, creator_id):
         notify_owner_account_created(creator_id, "SLOW DNS", user, days_int, password)
         ip, domain, slowdns_pub = get_system_info()
         ns_domain = subprocess.getoutput("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'").strip()
-        expiry = subprocess.getoutput(f"chage -l {user} | grep 'Account expires' | cut -d: -f2").strip()
+        expiry = subprocess.getoutput(f"chage -l {shlex.quote(user)} | grep 'Account expires' | cut -d: -f2").strip()
         res = (
             f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
             f"┃      SLOW DNS ACCOUNT \n"
@@ -1176,7 +1182,7 @@ def view_slowdns_account(call):
     ns_domain = subprocess.getoutput("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'").strip()
     password = "*******"
     expiry = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip() or "N/A"
     details = (
         f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
@@ -1288,7 +1294,7 @@ def _udpfast_get_days(message, user, password, creator_id):
     if success:
         notify_owner_account_created(creator_id, "UDP FAST", user, days_int, password)
         ip, domain, _ = get_system_info()
-        expiry = subprocess.getoutput(f"chage -l {user} | grep 'Account expires' | cut -d: -f2").strip()
+        expiry = subprocess.getoutput(f"chage -l {shlex.quote(user)} | grep 'Account expires' | cut -d: -f2").strip()
         res = (
             f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
             f"┃      UDP FAST ACCOUNT \n"
@@ -1392,7 +1398,7 @@ def view_udpfast_account(call):
     ip, domain, _ = get_system_info()
     password = "*******"
     expiry = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip() or "N/A"
     details = (
         f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
@@ -1897,74 +1903,432 @@ if __name__ == "__main__":
     bot.infinity_polling()
 EOF
 
-# 4. Configuration des utilisateurs système
-if ! getent group the-s-bot >/dev/null; then
-  groupadd --system the-s-bot
-fi
-if ! id -u the-s-bot >/dev/null 2>&1; then
-  useradd --system --gid the-s-bot --home-dir /nonexistent --shell /usr/sbin/nologin the-s-bot
-fi
+# 3b. Modules du bot (system_core, ssh_core, admin_core, xray_core, zivpn_core + nettoyage)
+echo "🧩 Écriture des modules du bot..."
+cat << 'MODULE_EOF' > "$CONFIG_DIR/modules/__init__.py"
+# Modules du bot The_S
+MODULE_EOF
 
-# 5. Création interactive du config.json s'il n'existe pas
-if [[ ! -f "$CONFIG_FILE" ]]; then
-  bot_token="${THE_S_BOT_TOKEN:-}"
-  admin_id="${THE_S_BOT_SUPER_ADMIN:-}"
-  if [[ -z "$bot_token" ]]; then
-    read -r -s -p "🔑 Token du bot Telegram : " bot_token
-    echo
-  fi
-  if [[ -z "$admin_id" ]]; then
-    read -r -p "👤 ID Telegram du super administrateur : " admin_id
-  fi
-  if [[ ! "$admin_id" =~ ^[0-9]+$ || -z "$bot_token" ]]; then
-    echo "❌ Token ou ID super administrateur invalide." >&2
-    exit 1
-  fi
-  BOT_TOKEN="$bot_token" SUPER_ADMIN="$admin_id" python3 - "$CONFIG_FILE" <<'PY'
+cat << 'MODULE_EOF' > "$CONFIG_DIR/modules/common.py"
+"""Fonctions communes aux modules du bot The_S."""
+import contextlib
+import fcntl
+import html
 import json
 import os
-import sys
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump({"bot_token": os.environ["BOT_TOKEN"], "super_admin": int(os.environ["SUPER_ADMIN"])}, handle, indent=2)
-    handle.write("\n")
-PY
-  chmod 0640 "$CONFIG_FILE"
-fi
+import re
+import subprocess
+import tempfile
+import threading
+import time
+from datetime import date, timedelta
 
-# Vérification syntaxique du JSON
-python3 - "$CONFIG_FILE" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    cfg = json.load(handle)
-if not cfg.get("bot_token") or not str(cfg.get("super_admin", "")).isdigit():
-    raise SystemExit("❌ config.json doit contenir bot_token et un super_admin numérique")
-PY
+CONFIG_DIR       = os.environ.get("THE_S_BOT_CONFIG_DIR", "/etc/the_s_bot")
+CONFIG_FILE      = os.path.join(CONFIG_DIR, "config.json")
+XRAY_CONFIG      = os.environ.get("THE_S_BOT_XRAY_CONFIG", "/etc/xray/config.json")
+XRAY_DOMAIN_FILE = os.environ.get("THE_S_BOT_XRAY_DOMAIN", "/etc/xray/domain")
+ZIVPN_CONFIG     = os.environ.get("THE_S_BOT_ZIVPN_CONFIG", "/etc/zivpn/config.json")
 
-if [[ ! -f "$RESELLERS_FILE" ]]; then
-  printf '{}\n' > "$RESELLERS_FILE"
-fi
-if [[ ! -f "$CONVS_FILE" ]]; then
-  printf '{}\n' > "$CONVS_FILE"
-fi
-if [[ ! -f "$VISITORS_FILE" ]]; then
-  printf '{}\n' > "$VISITORS_FILE"
-fi
+LINE   = "━━━━━━━━━━━━━━━━━━━━━━━━"
+FOOTER = "✅ Développé par 🜲 THE_S TECH.✅"
 
-chown -R root:the-s-bot "$CONFIG_DIR"
-chmod 0750 "$CONFIG_DIR"
-chmod 0640 "$CONFIG_FILE" "$RESELLERS_FILE" "$CONVS_FILE" "$VISITORS_FILE" "$CONFIG_DIR/Thes.py"
+# ── Verrou (thread + processus) ────────────────────────────────────────────
+_rlock   = threading.RLock()
+_depth   = 0
+_lock_fd = None
 
-# 6. Installation de l'environnement virtuel Python
-echo "🐍 Configuration de l'environnement virtuel Python..."
-python3 -m venv "$APP_DIR/venv"
-"$APP_DIR/venv/bin/pip" install --upgrade pip
-"$APP_DIR/venv/bin/pip" install -r "$CONFIG_DIR/requirements.txt"
 
-# 7. Installation et démarrage du service systemd
-install -m 0644 "$DOWNLOAD_DIR/the-s-bot.service" /etc/systemd/system/the-s-bot.service
-systemctl daemon-reload
-systemctl enable --now the-s-bot.service
+@contextlib.contextmanager
+def state_lock():
+    """Verrou réentrant : protège les fichiers d'état contre les accès simultanés
+    (bot + tâche cron de nettoyage)."""
+    global _depth, _lock_fd
+    with _rlock:
+        if _depth == 0:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            _lock_fd = os.open(os.path.join(CONFIG_DIR, ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(_lock_fd, fcntl.LOCK_EX)
+        _depth += 1
+        try:
+            yield
+        finally:
+            _depth -= 1
+            if _depth == 0:
+                fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+                os.close(_lock_fd)
+                _lock_fd = None
 
-echo "✨ Installation terminée avec succès !"
-systemctl --no-pager --full status the-s-bot.service
+
+# ── JSON ───────────────────────────────────────────────────────────────────
+def load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except ValueError:
+        with contextlib.suppress(OSError):
+            os.replace(path, f"{path}.corrupt-{int(time.time())}")
+        return default
+
+
+def save_json(path, data, mode=0o600, like=None):
+    """Écriture atomique. `like` : copie droits et propriétaire d'un fichier existant."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    uid = gid = None
+    ref = like if like and os.path.exists(like) else (path if os.path.exists(path) else None)
+    if ref:
+        st = os.stat(ref)
+        mode, uid, gid = st.st_mode & 0o777, st.st_uid, st.st_gid
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.chmod(tmp, mode)
+        if uid is not None and os.geteuid() == 0:
+            os.chown(tmp, uid, gid)
+        os.replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+# ── Commandes ──────────────────────────────────────────────────────────────
+def run(cmd, input_text=None, timeout=30):
+    """Exécute une commande SANS shell. Retourne (code, stdout, stderr)."""
+    try:
+        p = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", f"commande introuvable : {cmd[0]}"
+    except subprocess.TimeoutExpired:
+        return 124, "", "délai dépassé"
+
+
+# ── Infos serveur ──────────────────────────────────────────────────────────
+_ip_cache = [0.0, ""]
+
+
+def get_ip():
+    if _ip_cache[1] and time.time() - _ip_cache[0] < 600:
+        return _ip_cache[1]
+    rc, out, _ = run(["curl", "-s", "-m", "5", "ifconfig.me"], timeout=8)
+    if rc == 0 and re.match(r"^[0-9a-fA-F:.]+$", out or ""):
+        _ip_cache[0], _ip_cache[1] = time.time(), out
+        return out
+    return _ip_cache[1] or "N/A"
+
+
+def get_domain():
+    try:
+        with open(XRAY_DOMAIN_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip() or "N/A"
+    except OSError:
+        return "N/A"
+
+
+def get_host():
+    d = get_domain()
+    return d if d != "N/A" else get_ip()
+
+
+def bot_config():
+    return load_json(CONFIG_FILE, {})
+
+
+# ── Dates ──────────────────────────────────────────────────────────────────
+def parse_date(value):
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def calc_expiry(days, current=None):
+    """Nouvelle date d'expiration : on part du plus tard entre aujourd'hui et l'expiration actuelle."""
+    base = date.today()
+    if current and current > base:
+        base = current
+    return base + timedelta(days=int(days))
+
+
+def is_expired(value):
+    d = parse_date(value)
+    return d is not None and d <= date.today()
+
+
+# ── Mise en forme HTML (Telegram) ──────────────────────────────────────────
+def esc(value):
+    return html.escape(str(value), quote=False)
+
+
+def kv(icon, label, value):
+    return f"{icon} {label}: <code>{esc(value)}</code>"
+
+
+def card(title, lines):
+    head = ["┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓", f"┃      {title}", "┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛"]
+    return "\n".join(head + list(lines) + [LINE, FOOTER, LINE])
+MODULE_EOF
+
+cat << 'MODULE_EOF' > "$CONFIG_DIR/modules/system_core.py"
+"""État du VPS et nettoyage des logs."""
+import os
+import platform
+import re
+import shutil
+
+from modules import common as c
+
+SERVICES = [("SSH", ("ssh", "sshd")), ("Xray", ("xray",)), ("ZIVPN", ("zivpn",)),
+            ("Nginx", ("nginx",)), ("The_S Bot", ("the-s-bot",))]
+
+
+def _human(n):
+    n = float(n)
+    for unit in ("o", "Ko", "Mo", "Go", "To"):
+        if n < 1024 or unit == "To":
+            return f"{n:.0f} {unit}" if unit == "o" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def _uptime():
+    try:
+        with open("/proc/uptime") as f:
+            s = int(float(f.read().split()[0]))
+    except OSError:
+        return "N/A"
+    d, r = divmod(s, 86400)
+    h, r = divmod(r, 3600)
+    return f"{d}j {h}h {r // 60}min"
+
+
+def _meminfo():
+    info = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                info[k] = int(v.split()[0]) * 1024
+    except (OSError, ValueError):
+        pass
+    return info
+
+
+def _os_name():
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return platform.system()
+
+
+def _service_state(names):
+    for name in names:
+        rc, out, _ = c.run(["systemctl", "show", "-p", "LoadState", "--value", f"{name}.service"], timeout=10)
+        if rc == 0 and out and out != "not-found":
+            rc, out, _ = c.run(["systemctl", "is-active", f"{name}.service"], timeout=10)
+            return out == "active", out or "inconnu"
+    return None, "non installé"
+
+
+def _count_accounts():
+    d = c.CONFIG_DIR
+    ssh   = len(c.load_json(os.path.join(d, "ssh_accounts.json"), {}))
+    zivpn = len(c.load_json(os.path.join(d, "zivpn_accounts.json"), {}))
+    xray  = c.load_json(os.path.join(d, "xray_accounts.json"), {})
+    return ssh, zivpn, {p: len(v) for p, v in xray.items()}
+
+
+def get_vps_status():
+    mem = _meminfo()
+    total, avail = mem.get("MemTotal", 0), mem.get("MemAvailable", 0)
+    used = total - avail
+    du = shutil.disk_usage("/")
+    try:
+        l1, l5, l15 = os.getloadavg()
+        load = f"{l1:.2f} / {l5:.2f} / {l15:.2f}"
+    except OSError:
+        load = "N/A"
+    lines = ["📊 <b>ÉTAT DU VPS</b>", c.LINE,
+             c.kv("🖥️", "Hôte", platform.node()),
+             c.kv("🐧", "Système", _os_name()),
+             c.kv("🌍", "IP", c.get_ip()),
+             c.kv("⏱️", "Uptime", _uptime()),
+             c.kv("⚙️", "CPU (cœurs)", os.cpu_count() or "N/A"),
+             c.kv("📈", "Charge 1/5/15 min", load)]
+    if total:
+        lines.append(c.kv("🧠", "RAM", f"{_human(used)} / {_human(total)} ({used * 100 // total}%)"))
+    lines.append(c.kv("💾", "Disque", f"{_human(du.used)} / {_human(du.total)} ({du.used * 100 // du.total}%)"))
+    lines += [c.LINE, "🔧 <b>Services</b>"]
+    for label, names in SERVICES:
+        ok, state = _service_state(names)
+        if ok is None:
+            continue
+        lines.append(f"{'🟢' if ok else '🔴'} {label} : <code>{c.esc(state)}</code>")
+    ssh, zivpn, xray = _count_accounts()
+    lines += [c.LINE, "👥 <b>Comptes gérés</b>", f"SSH : <b>{ssh}</b> | ZIVPN : <b>{zivpn}</b>"]
+    if xray:
+        lines.append(" | ".join(f"{p.upper()} : <b>{n}</b>" for p, n in sorted(xray.items())))
+    return "\n".join(lines)
+
+
+def _dir_size(path):
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def clean_system_logs():
+    before = _dir_size("/var/log")
+    c.run(["journalctl", "--vacuum-time=2d"], timeout=60)
+    c.run(["journalctl", "--vacuum-size=50M"], timeout=60)
+    for root, dirs, files in os.walk("/var/log"):
+        dirs[:] = [d for d in dirs if d != "journal"]
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                if os.path.islink(path):
+                    continue
+                if name.endswith((".gz", ".xz", ".bz2", ".zst", ".old")) or re.search(r"\.\d+$", name):
+                    os.unlink(path)
+                elif name.endswith(".log"):
+                    open(path, "w").close()
+            except OSError:
+                pass
+    c.run(["apt-get", "clean"], timeout=60)
+    after = _dir_size("/var/log")
+    freed = max(0, before - after)
+    return (f"🧹 <b>Nettoyage terminé</b>\n\n💾 Libéré : <code>{_human(freed)}</code>\n"
+            f"📁 /var/log : <code>{_human(after)}</code>")
+MODULE_EOF
+
+cat << 'MODULE_EOF' > "$CONFIG_DIR/modules/ssh_core.py"
+"""Gestion des comptes SSH (SSH, SlowDNS et UDP Fast utilisent ces comptes).
+
+Sécurité : seuls les comptes créés par le bot (registre ssh_accounts.json) peuvent être
+renouvelés, verrouillés ou supprimés. Impossible de toucher à root ou à un compte système.
+"""
+import os
+import pwd
+import re
+
+from modules import common as c
+
+REG      = os.path.join(c.CONFIG_DIR, "ssh_accounts.json")
+NAME_RE  = re.compile(r"^[a-z][a-z0-9_-]{3,31}$")
+SSH_PORT = "22"
+WS_PORT  = "80"
+
+
+def _reg():
+    return c.load_json(REG, {})
+
+
+def _save(reg):
+    c.save_json(REG, reg)
+
+
+def _exists(user):
+    try:
+        pwd.getpwnam(user)
+        return True
+    except KeyError:
+        return False
+
+
+def _check_name(user):
+    if not NAME_RE.match(user or ""):
+        return ("❌ Nom SSH invalide : 4 à 32 caractères, minuscules, chiffres, <code>_</code> et "
+                "<code>-</code>, et il doit commencer par une lettre minuscule.")
+    return None
+
+
+def _ensure_false_shell():
+    try:
+        with open("/etc/shells", "r+", encoding="utf-8") as f:
+            if "/bin/false" not in f.read().split():
+                f.write("\n/bin/false\n")
+    except OSError:
+        pass
+
+
+def _kill_sessions(user):
+    c.run(["pkill", "-KILL", "-u", user])
+
+
+def create_ssh_account(user, password, days, created_by_id=None):
+    user = (user or "").strip()
+    err = _check_name(user)
+    if err:
+        return False, err
+    if not password or len(password) < 4 or any(ord(ch) < 32 for ch in password):
+        return False, "❌ Mot de passe invalide (4 caractères minimum, sans caractères de contrôle)."
+    days = int(days)
+    with c.state_lock():
+        reg = _reg()
+        if user in reg or _exists(user):
+            return False, f"❌ Le compte <b>{c.esc(user)}</b> existe déjà."
+        _ensure_false_shell()
+        expiry = c.calc_expiry(days)
+        rc, _, e = c.run(["useradd", "-M", "-s", "/bin/false", "-e", expiry.isoformat(), user])
+        if rc != 0:
+            return False, f"❌ Échec de création : {c.esc(e or rc)}"
+        rc, _, e = c.run(["chpasswd"], input_text=f"{user}:{password}\n")
+        if rc != 0:
+            c.run(["userdel", user])
+            return False, f"❌ Échec du mot de passe : {c.esc(e or rc)}"
+        reg[user] = {"expiry": expiry.isoformat(), "created_by": created_by_id,
+                     "created_at": c.date.today().isoformat(), "locked": False}
+        _save(reg)
+    return True, c.card("SSH/WS ACCOUNT", [
+        c.kv("👤", "Username", user),
+        c.kv("🔑", "Password", password),
+        c.kv("⏳", "Expiry", expiry.isoformat()),
+        c.kv("🖥️", "IP", c.get_ip()),
+        c.kv("🌐", "Domain", c.get_domain()),
+        c.kv("🔌", "Port SSH", SSH_PORT),
+        c.kv("🔌", "Port WS", WS_PORT),
+    ])
+
+
+def renew_ssh_account(user, days):
+    user = (user or "").strip()
+    with c.state_lock():
+        reg = _reg()
+        if user not in reg or not _exists(user):
+            return False, f"❌ Compte <b>{c.esc(user)}</b> introuvable (comptes gérés par le bot uniquement)."
+        new = c.calc_expiry(int(days), c.parse_date(reg[user].get("expiry")))
+        rc, _, e = c.run(["usermod", "-e", new.isoformat(), user])
+        if rc != 0:
+            return False, f"❌ Échec du renouvellement : {c.esc(e or rc)}"
+        reg[user]["expiry"] = new.isoformat()
+        _save(reg)
+    return True, (f"✅ Compte <b>{c.esc(user)}</b> renouvelé de <b>{int(days)}</b> jour(s).\n"
+                  f"⏳ Nouvelle expiration : <code>{new.isoformat()}</code>")
+
+
+def delete_ssh_account(user):
+    user = (user or "").strip()
+    with c.state_lock():
+        reg = _reg()
+        if user not in reg:
+            return False, f"❌ Compte <b>{c.esc(user)}</b> introuvable (comptes gérés par le bot uniquement)."
+        _kill_sessions(user)
+        rc, _, e = c.run(["userdel", user])
+        if rc not in (0, 6) and _exists(user):
+            return False, f"❌ Échec de suppression : {c.esc(e or rc)}"
+        reg.pop(user, None)
+        _save(reg)
+  
