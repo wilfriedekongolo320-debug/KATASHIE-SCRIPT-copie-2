@@ -1,5 +1,7 @@
 import telebot
 import subprocess
+import shlex
+import html
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
@@ -15,22 +17,31 @@ CONFIG_FILE    = f'{CONFIG_DIR}/config.json'
 RESELLERS_FILE = f'{CONFIG_DIR}/resellers.json'
 CONVS_FILE     = f'{CONFIG_DIR}/convs.json'
 VISITORS_FILE  = f'{CONFIG_DIR}/visitors.json'
-MENU_IMAGE_URL = ""
 
 def load_config():
     if not os.path.exists(CONFIG_FILE): return None
     with open(CONFIG_FILE, 'r') as f: return json.load(f)
 
 config = load_config()
-if not config: exit(1)
+if not config: raise SystemExit("config.json introuvable ou vide : relancez install.sh")
 
 bot         = telebot.TeleBot(config.get('bot_token'))
 SUPER_ADMIN = int(config.get('super_admin'))
-BRAND       = config.get('brand', '🜲 THE_S')
+DEFAULT_BRAND = '🔥THE_S-TUNNEL-PRO☄️📶🛜'
 
-# ══════════════════════════════════════════
-#  VALIDATION
-# ══════════════════════════════════════════
+def clean_brand(value):
+    """La marque est insérée dans des messages HTML : on retire < > &."""
+    value = re.sub(r'<[^>]*>', '', str(value or ''))
+    value = re.sub(r'[<>&]', '', value)
+    value = re.sub(r'\s+', ' ', value).strip()
+    return value or DEFAULT_BRAND
+
+BRAND       = clean_brand(config.get('brand', DEFAULT_BRAND))
+
+def hx(value):
+    """Échappe un texte (nom, mot de passe, message...) avant de l'insérer dans un message HTML Telegram."""
+    return html.escape(str(value), quote=False)
+
 def validate_username(username):
     if not username or len(username) < 4:
         return False, "❌ Minimum 4 caractères.\n📌 Exemple : <code>jean01</code>"
@@ -44,7 +55,7 @@ def validate_password(password):
     if len(password) < 4:
         return False, (
             f"❌ Mot de passe trop court.\n\n"
-            f"➡️ <code>{password}</code> ⬅️ ({len(password)} caractère(s))\n\n"
+            f"➡️ <code>{hx(password)}</code> ⬅️ ({len(password)} caractère(s))\n\n"
             f"📌 Minimum 4 caractères. Exemple : <code>pass1234</code>"
         )
     return True, ""
@@ -52,7 +63,7 @@ def validate_password(password):
 def validate_days(text, max_days):
     if not text.isdigit():
         return False, (
-            f"❌ Valeur invalide : <code>{text}</code>\n\n"
+            f"❌ Valeur invalide : <code>{hx(text)}</code>\n\n"
             f"📌 Entrez un nombre entier. Exemple : <code>7</code>\n"
             f"⏳ Maximum autorisé : <b>{max_days} jour(s)</b>"
         )
@@ -70,9 +81,6 @@ def validate_days(text, max_days):
         )
     return True, ""
 
-# ══════════════════════════════════════════
-#  BOUTON ANNULER
-# ══════════════════════════════════════════
 def cancel_keyboard(back_menu):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("❌ Annuler", callback_data=f"cancel_to_{back_menu}"))
@@ -94,9 +102,6 @@ def handle_cancel(call):
         reply_markup=protocol_menu_keyboard(target, uid) if target != "home" else main_menu_keyboard(uid)
     )
 
-# ══════════════════════════════════════════
-#  REVENDEURS — PERSISTANCE
-# ══════════════════════════════════════════
 def load_resellers():
     if not os.path.exists(RESELLERS_FILE): return {}
     with open(RESELLERS_FILE, 'r') as f: return json.load(f)
@@ -149,18 +154,15 @@ def register_visitor(user):
         try:
             bot.send_message(
                 SUPER_ADMIN,
-                f"🆕 *Nouvel utilisateur a lancé le bot 🜲 THE_S_TECH TUNNEL 🜲 *\n\n"
-                f"👤 Nom : {user.first_name or 'N/A'}\n"
-                f"🔗 Username : @{user.username or 'N/A'}\n"
-                f"🆔 ID : `{user.id}`",
-                parse_mode="Markdown"
+                f"🆕 <b>Nouvel utilisateur a lancé le bot {BRAND}</b>\n\n"
+                f"👤 Nom : {html.escape(user.first_name or 'N/A')}\n"
+                f"🔗 Username : @{html.escape(user.username or 'N/A')}\n"
+                f"🆔 ID : <code>{user.id}</code>",
+                parse_mode="HTML"
             )
         except Exception:
             pass
 
-# ══════════════════════════════════════════
-#  GESTION REVENDEURS
-# ══════════════════════════════════════════
 def get_reseller(uid):
     return load_resellers().get(str(uid))
 
@@ -196,9 +198,6 @@ def days_remaining(uid):
     remain    = expiry - datetime.now()
     return max(0, remain.days)
 
-# ══════════════════════════════════════════
-#  VÉRIFICATION EXPIRATION AUTO (thread)
-# ══════════════════════════════════════════
 def _expiration_loop():
     while True:
         try:
@@ -217,10 +216,10 @@ def _expiration_loop():
                         markup.add(InlineKeyboardButton(f"📩 Contacter {BRAND}", callback_data="contact_pps"))
                         bot.send_message(
                             uid_int,
-                            f"⛔ *Abonnement expiré à 🜲 THE_S_TECH TUNNEL 🜲*\n\n"
+                            f"⛔ <b>Abonnement expiré à {BRAND}</b>\n\n"
                             f"Votre abonnement est arrivé à son terme.\n"
                             f"Contactez {BRAND} pour le renouveler.",
-                            parse_mode="Markdown",
+                            parse_mode="HTML",
                             reply_markup=markup
                         )
                     except Exception:
@@ -228,8 +227,8 @@ def _expiration_loop():
                     try:
                         bot.send_message(
                             SUPER_ADMIN,
-                            f"ℹ️ Revendeur *{alias}* (`{rid}`) expiré — supprimé automatiquement.",
-                            parse_mode="Markdown"
+                            f"ℹ️ Revendeur <b>{html.escape(str(alias))}</b> (<code>{rid}</code>) expiré — supprimé automatiquement.",
+                            parse_mode="HTML"
                         )
                     except Exception:
                         pass
@@ -242,9 +241,6 @@ def _expiration_loop():
 
 threading.Thread(target=_expiration_loop, daemon=True).start()
 
-# ══════════════════════════════════════════
-#  ACCÈS
-# ══════════════════════════════════════════
 def is_admin(user_id):
     cfg = load_config()
     return user_id == SUPER_ADMIN or user_id in cfg.get('admins', [])
@@ -252,40 +248,31 @@ def is_admin(user_id):
 def has_access(user_id):
     return is_admin(user_id) or (get_reseller(user_id) is not None and is_active(user_id))
 
-# ══════════════════════════════════════════
-#  NOTIFICATION OWNER — COMPTE CRÉÉ
-# ══════════════════════════════════════════
 def notify_owner_account_created(creator_id, proto, username, days, password=""):
     if creator_id == SUPER_ADMIN:
         return
     try:
         r     = get_reseller(creator_id)
-        alias = r.get("alias", str(creator_id)) if r else "OWNER"
+        alias = hx(r.get("alias", str(creator_id)) if r else "OWNER")
         msg   = (
-            f"🔔 <b>Nouveau compte créé sur 🜲 THE_S_TECH TUNNEL 🜲</b>\n\n"
+            f"🔔 <b>Nouveau compte créé sur {BRAND}</b>\n\n"
             f"👤 Revendeur : <b>{alias}</b> (<code>{creator_id}</code>)\n"
             f"🔌 Protocole : <b>{proto.upper()}</b>\n"
-            f"🧑 Username  : <code>{username}</code>\n"
+            f"🧑 Username  : <code>{hx(username)}</code>\n"
         )
         if password:
-            msg += f"🔑 Mot de passe : <code>{password}</code>\n"
+            msg += f"🔑 Mot de passe : <code>{hx(password)}</code>\n"
         msg += f"⏳ Durée : <b>{days} jour(s)</b>"
         bot.send_message(SUPER_ADMIN, msg, parse_mode="HTML")
     except Exception:
         pass
 
-# ══════════════════════════════════════════
-#  RÉCUPÉRATION INFOS SYSTÈME
-# ══════════════════════════════════════════
 def get_system_info():
-    ip          = subprocess.getoutput("curl -s ifconfig.me").strip()
+    ip          = subprocess.getoutput("curl -s -m 5 ifconfig.me").strip()
     domain      = subprocess.getoutput("cat /etc/xray/domain 2>/dev/null || echo 'N/A'").strip()
     slowdns_pub = subprocess.getoutput("cat /etc/slowdns/server.pub 2>/dev/null || echo 'N/A'").strip()
     return ip, domain, slowdns_pub
 
-# ══════════════════════════════════════════
-#  CLAVIERS
-# ══════════════════════════════════════════
 def main_menu_keyboard(uid):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -332,18 +319,13 @@ def protocol_menu_keyboard(proto, uid):
     return markup
 
 def _show_submenu(call, text, markup):
-    if call.message.content_type == 'photo':
-        try: bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception: pass
-        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
-    else:
+    try:
         bot.edit_message_text(text, chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               parse_mode="HTML", reply_markup=markup)
+    except Exception:
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
 
-# ══════════════════════════════════════════
-#  /start
-# ══════════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     uid = message.from_user.id
@@ -353,7 +335,7 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton(f"📩 Contacter {BRAND}", callback_data="contact_pps_unauth"))
         bot.send_message(
             uid,
-            f"⛔ <b>Accès refusé à 🜲 THE_S_TECH TUNNEL 🜲</b>\n\n"
+            f"⛔ <b>Accès refusé à {BRAND}</b>\n\n"
             f"Vous n'êtes pas autorisé à utiliser ce bot.\n"
             f"Contactez <b>{BRAND}</b> pour obtenir un accès.",
             parse_mode="HTML",
@@ -364,38 +346,23 @@ def send_welcome(message):
     rtype  = r['type'].upper() if r else "OWNER"
     remain = fmt_remain(uid) if r else ""
     extra  = f"\n🏷️ Type : <b>{rtype}</b> | ⏳ Restant : <b>{remain}</b>" if r else ""
-    bot.send_photo(
+    bot.send_message(
         uid,
-        MENU_IMAGE_URL,
-        caption=f"<b> 🜲 THE_S_TECH TUNNEL 🜲</b>{extra}\nSélectionnez un Protocole :",
+        f"<b>{BRAND}</b>{extra}\n\nSélectionnez un Protocole ou un module :",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(uid)
     )
 
-# ══════════════════════════════════════════
-#  RETOUR ACCUEIL
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "action_home")
 def home_callback(call):
     uid = call.from_user.id
     if not has_access(uid): return
-    try: bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception: pass
     r      = get_reseller(uid)
     rtype  = r['type'].upper() if r else "OWNER"
     remain = fmt_remain(uid) if r else ""
     extra  = f"\n🏷️ Type : <b>{rtype}</b> | ⏳ Restant : <b>{remain}</b>" if r else ""
-    bot.send_photo(
-        call.message.chat.id,
-        MENU_IMAGE_URL,
-        caption=f"<b> 🜲 THE_S_TECH TUNNEL 🜲</b>{extra}\nSélectionnez un module :",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(uid)
-    )
+    _show_submenu(call, f"<b>{BRAND}</b>{extra}\n\nSélectionnez un module :", main_menu_keyboard(uid))
 
-# ══════════════════════════════════════════
-#  DÉFINIR SA MARQUE (SUPER ADMIN UNIQUEMENT)
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "set_brand_menu")
 def set_brand_callback(call):
     if call.from_user.id != SUPER_ADMIN:
@@ -408,14 +375,11 @@ def set_brand_callback(call):
         f"Marque actuelle : <b>{BRAND}</b>\n\n"
         f"📌 <b>Utilisez la commande :</b>\n"
         f"<code>/setbrand VOTRE_NOM</code>\n\n"
-        f"👉 Exemple : <code>/setbrand 🜲 THE_S_TECH </code>\n\n"
+        f"👉 Exemple : <code>/setbrand 🔥THE_S-TUNNEL-PRO☄️📶🛜</code>\n\n"
         f"✅ Le nouveau nom remplacera <b>{BRAND}</b> partout dans le bot.",
         parse_mode="HTML"
     )
 
-# ══════════════════════════════════════════
-#  SOUS-MENUS PROTOCOLES
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data in (
     "menu_ssh","menu_vmess","menu_vless","menu_trojan","menu_socks","menu_zivpn"
 ))
@@ -426,9 +390,6 @@ def protocol_submenu(call):
     _show_submenu(call, f"<b>Module {proto.upper()} — {BRAND}</b>\nChoisissez une action :",
                   protocol_menu_keyboard(proto, uid))
 
-# ══════════════════════════════════════════
-#  CONTACT THE_S
-# ══════════════════════════════════════════
 user_sessions = {}
 
 @bot.callback_query_handler(func=lambda call: call.data in ("contact_pps", "contact_pps_unauth"))
@@ -466,9 +427,9 @@ def handle_contact_message(message):
         bot.send_message(
             SUPER_ADMIN,
             f"📩 <b>Nouveau Message reçu 💬</b>\n\n"
-            f"👤 {alias} | 🏷️ {rtype}\n"
-            f"🆔 <code>{uid}</code> | @{uname}\n\n"
-            f"{message.text}",
+            f"👤 {hx(alias)} | 🏷️ {rtype}\n"
+            f"🆔 <code>{uid}</code> | @{hx(uname)}\n\n"
+            f"{hx(message.text or '')}",
             parse_mode="HTML",
             reply_markup=markup
         )
@@ -476,9 +437,6 @@ def handle_contact_message(message):
     bot.send_message(uid, f"✅ Message envoyé à <b>{BRAND}</b>.", parse_mode="HTML",
                      reply_markup=main_menu_keyboard(uid) if has_access(uid) else None)
 
-# ══════════════════════════════════════════
-#  MESSAGERIE OWNER → REVENDEURS
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "msg_panel" and is_admin(call.from_user.id))
 def msg_panel(call):
     resellers = load_resellers()
@@ -501,7 +459,7 @@ def msg_panel(call):
         )])
     kb.append([InlineKeyboardButton("🔙 Retour", callback_data="action_home")])
     _show_submenu(call,
-        f"<b>💬 Messagerie de 🜲 THE_S_TECH TUNNEL 🜲</b>\n\nChoisissez un destinataire :",
+        f"<b>💬 Messagerie de {BRAND}</b>\n\nChoisissez un destinataire :",
         InlineKeyboardMarkup(kb))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("msg_conv_") and is_admin(call.from_user.id))
@@ -517,13 +475,13 @@ def msg_conv(call):
     hist  = ""
     for m in msgs[-15:]:
         arrow = "➡️" if m["direction"] == "to" else "⬅️"
-        hist += f"{arrow} {m['sender']} [{m['time']}]\n{m['text']}\n\n"
+        hist += f"{arrow} {hx(m['sender'])} [{m['time']}]\n{hx(m['text'])}\n\n"
     if not hist: hist = "Aucun message précédent.\n\n"
     user_sessions[uid] = {"state": "msg_to_user", "target_id": int(tid), "alias": alias}
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("❌ Annuler", callback_data="msg_panel"))
     _show_submenu(call,
-        f"<b>💬 Conversation avec {alias} ({rtype})</b>\n"
+        f"<b>💬 Conversation avec {hx(alias)} ({rtype})</b>\n"
         f"🆔 <code>{tid}</code>\n\n{hist}"
         f"Écrivez votre message :",
         markup)
@@ -552,7 +510,7 @@ def reply_to_user(call):
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     except Exception: pass
     bot.send_message(uid,
-        f"↩️ <b>Répondre à {alias}</b>\n\nÉcrivez votre réponse :",
+        f"↩️ <b>Répondre à {hx(alias)}</b>\n\nÉcrivez votre réponse :",
         parse_mode="HTML", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: user_sessions.get(m.from_user.id, {}).get("state") in ("msg_to_user", "broadcast"))
@@ -564,7 +522,7 @@ def handle_owner_message(message):
         sent = 0
         for rid in resellers:
             try:
-                bot.send_message(int(rid), f"📢 <b>Message de {BRAND}</b>\n\n{message.text}", parse_mode="HTML")
+                bot.send_message(int(rid), f"📢 <b>Message de {BRAND}</b>\n\n{hx(message.text)}", parse_mode="HTML")
                 add_conv_msg(int(rid), resellers[rid].get("alias", rid), message.text, "to")
                 sent += 1
             except Exception: pass
@@ -574,15 +532,12 @@ def handle_owner_message(message):
         alias = state["alias"]
         add_conv_msg(tid, alias, message.text, "to")
         try:
-            bot.send_message(tid, f"💬 <b>Message de {BRAND}</b>\n\n{message.text}", parse_mode="HTML")
-            bot.send_message(uid, f"✅ Message envoyé à <b>{alias}</b>.",
+            bot.send_message(tid, f"💬 <b>Message de {BRAND}</b>\n\n{hx(message.text)}", parse_mode="HTML")
+            bot.send_message(uid, f"✅ Message envoyé à <b>{hx(alias)}</b>.",
                              parse_mode="HTML", reply_markup=main_menu_keyboard(uid))
         except Exception as e:
             bot.send_message(uid, f"❌ Erreur : {e}")
 
-# ══════════════════════════════════════════
-#  GESTION REVENDEURS (bouton menu)
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_resellers" and is_admin(call.from_user.id))
 def menu_resellers(call):
     resellers = load_resellers()
@@ -590,28 +545,21 @@ def menu_resellers(call):
     for rid, info in resellers.items():
         remain = fmt_remain(int(rid))
         lines.append(
-            f"• <b>{info.get('alias', rid)}</b> | ID: <code>{rid}</code>\n"
+            f"• <b>{hx(info.get('alias', rid))}</b> | ID: <code>{rid}</code>\n"
             f"  Type: {info.get('type','?').upper()} | Max: {info.get('max_days',30)}j | Restant: {remain}"
         )
     txt = "\n\n".join(lines) if lines else "Aucun revendeur."
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔙 Retour", callback_data="action_home"))
     text = (
-        f"<b>👥 Revendeurs de 🜲 THE_S_TECH TUNNEL 🜲</b>\n\n{txt}\n\n"
+        f"<b>👥 Revendeurs de {BRAND}</b>\n\n{txt}\n\n"
         f"➕ /addreseller &lt;ID&gt; &lt;Alias&gt; &lt;trial|premium&gt; [jours]\n"
         f"➖ /delreseller &lt;ID&gt;\n"
         f"✏️ /setmaxdays &lt;ID&gt; &lt;jours&gt;\n"
         f"⏳ /extendtrial &lt;ID&gt; &lt;heures&gt;"
     )
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
-    bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+    _show_submenu(call, text, markup)
 
-# ══════════════════════════════════════════
-#  COMMANDES REVENDEURS
-# ══════════════════════════════════════════
 @bot.message_handler(commands=['addreseller'])
 def cmd_add_reseller(message):
     uid = message.from_user.id
@@ -620,12 +568,12 @@ def cmd_add_reseller(message):
     args = message.text.split()[1:]
     if len(args) < 3:
         bot.reply_to(message,
-            f"Usage :\n/addreseller <ID> <Alias> <trial|premium> [max_jours]\n\n"
+            f"Usage :\n/addreseller &lt;ID&gt; &lt;Alias&gt; &lt;trial|premium&gt; [max_jours]\n\n"
             f"Exemple :\n/addreseller 123456789 Jean premium 30",
             parse_mode="HTML"); return
     try:
         new_id   = int(args[0])
-        alias    = args[1]
+        alias    = re.sub(r'[<>&]', '', args[1]) or str(new_id)
         rtype    = args[2].lower()
         if rtype not in ["trial", "premium"]:
             bot.reply_to(message, "❌ Type invalide. Utilisez trial ou premium."); return
@@ -641,7 +589,7 @@ def cmd_add_reseller(message):
         }
         save_resellers(resellers)
         bot.reply_to(message,
-            f"✅ Revendeur ajouté à 🜲 THE_S_TECH TUNNEL 🜲\n\n"
+            f"✅ Revendeur ajouté à {BRAND}\n\n"
             f"• Alias : {alias}\n• ID : {new_id}\n"
             f"• Type : {rtype.upper()}\n• Max jours : {max_days}j")
         try:
@@ -672,7 +620,7 @@ def cmd_del_reseller(message):
     if not is_admin(uid): return
     args = message.text.split()[1:]
     if not args:
-        bot.reply_to(message, "Usage : /delreseller <ID>"); return
+        bot.reply_to(message, "Usage : /delreseller &lt;ID&gt;", parse_mode="HTML"); return
     try:
         rem_id    = int(args[0])
         resellers = load_resellers()
@@ -684,7 +632,7 @@ def cmd_del_reseller(message):
         bot.reply_to(message, f"✅ Revendeur {alias} retiré.")
         try:
             bot.send_message(rem_id,
-                f"⛔ <b>Accès retiré à 🜲 THE_S_TECH TUNNEL 🜲</b>\n\n"
+                f"⛔ <b>Accès retiré à {BRAND}</b>\n\n"
                 f"Votre accès au bot a été révoqué par {BRAND}.\n"
                 f"Contactez {BRAND} pour plus d'informations.",
                 parse_mode="HTML")
@@ -698,7 +646,7 @@ def cmd_set_max_days(message):
     if not is_admin(uid): return
     args = message.text.split()[1:]
     if len(args) < 2:
-        bot.reply_to(message, "Usage : /setmaxdays <ID> <jours>"); return
+        bot.reply_to(message, "Usage : /setmaxdays &lt;ID&gt; &lt;jours&gt;", parse_mode="HTML"); return
     try:
         tid  = str(int(args[0]))
         days = int(args[1])
@@ -719,7 +667,7 @@ def cmd_extend_trial(message):
     if not is_admin(uid): return
     args = message.text.split()[1:]
     if len(args) < 2:
-        bot.reply_to(message, "Usage : /extendtrial <ID> <heures>\nEx: /extendtrial 123456 72"); return
+        bot.reply_to(message, "Usage : /extendtrial &lt;ID&gt; &lt;heures&gt;\nEx: /extendtrial 123456 72", parse_mode="HTML"); return
     try:
         tid   = str(int(args[0]))
         hours = int(args[1])
@@ -739,7 +687,7 @@ def cmd_extend_trial(message):
             f"Nouveau total : {new_d}j {new_h%24}h")
         try:
             bot.send_message(int(tid),
-                f"🎉 <b>Abonnement prolongé sur 🜲 THE_S_TECH TUNNEL 🜲</b>\n\n"
+                f"🎉 <b>Abonnement prolongé sur {BRAND}</b>\n\n"
                 f"Votre abonnement a été prolongé de {hours} heure(s) par {BRAND}.\n"
                 f"Nouveau temps restant : {fmt_remain(int(tid))}.",
                 parse_mode="HTML")
@@ -747,9 +695,6 @@ def cmd_extend_trial(message):
     except ValueError:
         bot.reply_to(message, "❌ Valeur invalide.")
 
-# ══════════════════════════════════════════
-#  SETBRAND
-# ══════════════════════════════════════════
 @bot.message_handler(commands=['setbrand'])
 def cmd_setbrand(message):
     global BRAND
@@ -760,11 +705,11 @@ def cmd_setbrand(message):
     args = message.text.split(None, 1)
     if len(args) < 2:
         bot.reply_to(message,
-            "Usage : /setbrand <nouveau nom>\n\n"
-            "Exemple : /setbrand NOVA TECH",
+            "Usage : /setbrand &lt;nouveau nom&gt;\n\n"
+            "Exemple : /setbrand 🔥THE_S-TUNNEL-PRO☄️📶🛜",
             parse_mode="HTML")
         return
-    new_brand = args[1].strip()
+    new_brand = clean_brand(args[1])
     cfg = load_config()
     cfg['brand'] = new_brand
     with open(CONFIG_FILE, 'w') as f:
@@ -772,16 +717,13 @@ def cmd_setbrand(message):
     BRAND = new_brand
     bot.reply_to(message, f"✅ Marque mise à jour : <b>{new_brand}</b>", parse_mode="HTML")
 
-# ══════════════════════════════════════════
-#  SSH — CRÉATION
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "add_ssh")
 def add_ssh_start(call):
     uid   = call.from_user.id
     if not has_access(uid): return
     d_rem = days_remaining(uid)
     if d_rem == 0 and not is_admin(uid):
-        _show_submenu(call, f"❌ Abonnement expiré sur  🜲 THE_S_TECH TUNNEL 🜲\nContactez {BRAND}.",
+        _show_submenu(call, f"❌ Abonnement expiré sur  {BRAND}\nContactez {BRAND}.",
                       InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Retour", callback_data="menu_ssh")]])); return
     bot.edit_message_text("⚙️ Module SSH — Création",
                           chat_id=call.message.chat.id, message_id=call.message.message_id)
@@ -848,13 +790,12 @@ def _ssh_get_days(message, user, password, creator_id):
         bot.register_next_step_handler(msg, _ssh_get_days, user, password, creator_id)
         return
     days_int = int(message.text.strip())
-    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{user}</b>...", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{hx(user)}</b>...", parse_mode="HTML")
     success, res = ssh_core.create_ssh_account(user, password, days_int, created_by_id=creator_id)
     if success:
         notify_owner_account_created(creator_id, "SSH", user, days_int, password)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# SSH — RENOUVELLEMENT
 @bot.callback_query_handler(func=lambda call: call.data == "renew_ssh")
 def renew_ssh_start(call):
     uid = call.from_user.id
@@ -873,7 +814,7 @@ def _ssh_renew_get_days(message, creator_id):
     user  = message.text.strip()
     d_rem = days_remaining(creator_id)
     msg   = bot.send_message(message.chat.id,
-        f"⏳ <b>Jours à ajouter pour</b> <code>{user}</code>\n\n"
+        f"⏳ <b>Jours à ajouter pour</b> <code>{hx(user)}</code>\n\n"
         f"📌 Exemple : <code>7</code> | Max : <b>{d_rem}j</b>",
         parse_mode="HTML",
         reply_markup=cancel_keyboard("ssh"))
@@ -895,7 +836,6 @@ def _ssh_renew_execute(message, user, creator_id):
     success, res = ssh_core.renew_ssh_account(user, days_int)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# SSH — SUPPRESSION
 @bot.callback_query_handler(func=lambda call: call.data == "del_ssh")
 def del_ssh_start(call):
     uid = call.from_user.id
@@ -915,7 +855,6 @@ def _ssh_del_execute(message, creator_id):
     success, res = ssh_core.delete_ssh_account(user)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# SSH — VERROUILLAGE / DÉVERROUILLAGE
 @bot.callback_query_handler(func=lambda call: call.data in ("lock_ssh", "unlock_ssh"))
 def lock_unlock_ssh_start(call):
     uid    = call.from_user.id
@@ -940,9 +879,6 @@ def _ssh_lock_execute(message, action, creator_id):
         success, res = ssh_core.unlock_ssh_account(user)
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
-# ══════════════════════════════════════════
-#  SSH — LISTE + AFFICHAGE FORMAT COMPLET
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "list_ssh")
 def handle_list_ssh(call):
     uid = call.from_user.id
@@ -957,7 +893,7 @@ def handle_list_ssh(call):
     if users:
         for u in users:
             markup.add(InlineKeyboardButton(f"👤 {u}", callback_data=f"view_ssh_{u}"))
-        text = f"📋 <b>LISTE DES COMPTES SSH sur 🜲 THE_S_TECH TUNNEL 🜲</b>\nSélectionnez un compte :"
+        text = f"📋 <b>LISTE DES COMPTES SSH sur {BRAND}</b>\nSélectionnez un compte :"
     else:
         text = "📋 Aucun compte SSH trouvé."
     markup.add(InlineKeyboardButton("🔙 Retour Accueil", callback_data="action_home"))
@@ -970,23 +906,23 @@ def view_ssh_account(call):
     ip, domain, _ = get_system_info()
     password = "*******"
     expiry_raw = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip()
     expiry = expiry_raw if expiry_raw else "N/A"
     details = (
         f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
         f"┃       SSH/WS ACCOUNT\n"
         f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
-        f"👤 Username: <code>{user}</code>\n"
-        f"🔑 Password: <code>{password}</code>\n"
+        f"👤 Username: <code>{hx(user)}</code>\n"
+        f"🔑 Password: <code>{hx(password)}</code>\n"
         f"⏳ Expiry: <code>{expiry}</code>\n"
         f"🖥️ IP: <code>{ip}</code>\n"
         f"🌐 Domain: <code>{domain}</code>\n"
         f"🔌 Port SSH: <code>22</code>\n"
         f"🔌 Port WS: <code>80</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ Développé par 🜲 THE_S TECH.✅\n"
-        f" ━━━━━━━━━━━━━━━━━━━━━━━━"
+        f"✅ {BRAND}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -995,9 +931,6 @@ def view_ssh_account(call):
     )
     _show_submenu(call, details, markup)
 
-# ══════════════════════════════════════════
-#  SLOW DNS
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_slowdns")
 def menu_slowdns(call):
     uid = call.from_user.id
@@ -1012,7 +945,7 @@ def add_slowdns_start(call):
     if not has_access(uid): return
     d_rem = days_remaining(uid)
     if d_rem == 0 and not is_admin(uid):
-        _show_submenu(call, f"❌ Abonnement expiré sur 🜲 THE_S_TECH TUNNEL 🜲.",
+        _show_submenu(call, f"❌ Abonnement expiré sur {BRAND}.",
                       InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Retour", callback_data="menu_slowdns")]]))
         return
     bot.edit_message_text("⚙️ Module SLOW DNS — Création",
@@ -1080,19 +1013,19 @@ def _slowdns_get_days(message, user, password, creator_id):
         bot.register_next_step_handler(msg, _slowdns_get_days, user, password, creator_id)
         return
     days_int = int(message.text.strip())
-    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{user}</b> (SLOW DNS)...", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{hx(user)}</b> (SLOW DNS)...", parse_mode="HTML")
     success, res = ssh_core.create_ssh_account(user, password, days_int, created_by_id=creator_id)
     if success:
         notify_owner_account_created(creator_id, "SLOW DNS", user, days_int, password)
         ip, domain, slowdns_pub = get_system_info()
         ns_domain = subprocess.getoutput("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'").strip()
-        expiry = subprocess.getoutput(f"chage -l {user} | grep 'Account expires' | cut -d: -f2").strip()
+        expiry = subprocess.getoutput(f"chage -l {shlex.quote(user)} | grep 'Account expires' | cut -d: -f2").strip()
         res = (
             f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
             f"┃      SLOW DNS ACCOUNT \n"
             f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
-            f"👤 Username: <code>{user}</code>\n"
-            f"🔑 Password: <code>{password}</code>\n"
+            f"👤 Username: <code>{hx(user)}</code>\n"
+            f"🔑 Password: <code>{hx(password)}</code>\n"
             f"⏳ Expiry: <code>{expiry}</code>\n"
             f"🖥️ IP: <code>{ip}</code>\n"
             f"🌐 Domain: <code>{domain}</code>\n"
@@ -1100,8 +1033,8 @@ def _slowdns_get_days(message, user, password, creator_id):
             f"🔌 Port DNS: <code>53</code>\n"
             f"🔥 PUB Key:\n<code>{slowdns_pub}</code>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"✅ Développé par 🜲 THE_S TECH.✅\n"
-            f" ━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"✅ {BRAND}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━"
         )
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
@@ -1123,7 +1056,7 @@ def _slowdns_renew_days(message, creator_id):
     user  = message.text.strip()
     d_rem = days_remaining(creator_id)
     msg   = bot.send_message(message.chat.id,
-        f"⏳ <b>Jours à ajouter pour</b> <code>{user}</code>\n\n"
+        f"⏳ <b>Jours à ajouter pour</b> <code>{hx(user)}</code>\n\n"
         f"📌 Exemple : <code>7</code> | Max : <b>{d_rem}j</b>",
         parse_mode="HTML",
         reply_markup=cancel_keyboard("slowdns"))
@@ -1178,7 +1111,7 @@ def list_slowdns(call):
     if users:
         for u in users:
             markup.add(InlineKeyboardButton(f"👤 {u}", callback_data=f"view_slowdns_{u}"))
-        text = f"📋 <b>LISTE DES COMPTES SLOW DNS sur 🜲 THE_S_TECH TUNNEL 🜲</b>\nSélectionnez un compte :"
+        text = f"📋 <b>LISTE DES COMPTES SLOW DNS sur {BRAND}</b>\nSélectionnez un compte :"
     else:
         text = "📋 Aucun compte SLOW DNS trouvé."
     markup.add(InlineKeyboardButton("🔙 Retour Accueil", callback_data="action_home"))
@@ -1192,14 +1125,14 @@ def view_slowdns_account(call):
     ns_domain = subprocess.getoutput("cat /etc/slowdns/nsdomain 2>/dev/null || echo 'N/A'").strip()
     password = "*******"
     expiry = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip() or "N/A"
     details = (
         f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
         f"┃      SLOW DNS ACCOUNT \n"
         f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
-        f"👤 Username: <code>{user}</code>\n"
-        f"🔑 Password: <code>{password}</code>\n"
+        f"👤 Username: <code>{hx(user)}</code>\n"
+        f"🔑 Password: <code>{hx(password)}</code>\n"
         f"⏳ Expiry: <code>{expiry}</code>\n"
         f"🖥️ IP: <code>{ip}</code>\n"
         f"🌐 Domain: <code>{domain}</code>\n"
@@ -1207,8 +1140,8 @@ def view_slowdns_account(call):
         f"🔌 Port DNS: <code>53</code>\n"
         f"🔥 PUB Key:\n<code>{slowdns_pub}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ Développé par 🜲 THE_S TECH.✅\n"
-        f" ━━━━━━━━━━━━━━━━━━━━━━━━"
+        f"✅ {BRAND}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -1217,9 +1150,6 @@ def view_slowdns_account(call):
     )
     _show_submenu(call, details, markup)
 
-# ══════════════════════════════════════════
-#  UDP FAST
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_udpfast")
 def menu_udpfast(call):
     uid = call.from_user.id
@@ -1234,7 +1164,7 @@ def add_udpfast_start(call):
     if not has_access(uid): return
     d_rem = days_remaining(uid)
     if d_rem == 0 and not is_admin(uid):
-        _show_submenu(call, f"❌ Abonnement expiré sur 🜲 THE_S_TECH TUNNEL 🜲.",
+        _show_submenu(call, f"❌ Abonnement expiré sur {BRAND}.",
                       InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Retour", callback_data="menu_udpfast")]]))
         return
     bot.edit_message_text("⚙️ Module UDP FAST — Création",
@@ -1302,26 +1232,26 @@ def _udpfast_get_days(message, user, password, creator_id):
         bot.register_next_step_handler(msg, _udpfast_get_days, user, password, creator_id)
         return
     days_int = int(message.text.strip())
-    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{user}</b> (UDP FAST)...", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{hx(user)}</b> (UDP FAST)...", parse_mode="HTML")
     success, res = ssh_core.create_ssh_account(user, password, days_int, created_by_id=creator_id)
     if success:
         notify_owner_account_created(creator_id, "UDP FAST", user, days_int, password)
         ip, domain, _ = get_system_info()
-        expiry = subprocess.getoutput(f"chage -l {user} | grep 'Account expires' | cut -d: -f2").strip()
+        expiry = subprocess.getoutput(f"chage -l {shlex.quote(user)} | grep 'Account expires' | cut -d: -f2").strip()
         res = (
             f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
             f"┃      UDP FAST ACCOUNT \n"
             f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
-            f"👤 Username: <code>{user}</code>\n"
-            f"🔑 Password: <code>{password}</code>\n"
+            f"👤 Username: <code>{hx(user)}</code>\n"
+            f"🔑 Password: <code>{hx(password)}</code>\n"
             f"⏳ Expiry: <code>{expiry}</code>\n"
             f"🖥️ IP: <code>{ip}</code>\n"
             f"🌐 Host: <code>{domain}</code>\n"
             f"🔌 Port UDP: <code>1-65535</code>\n"
-            f"🚀 Config: <code>{ip}:1-65535@{user}:{password}</code>\n"
+            f"🚀 Config: <code>{ip}:1-65535@{user}:{hx(password)}</code>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"✅ Développé par 🜲 THE_S TECH.✅\n"
-            f" ━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"✅ {BRAND}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━"
         )
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
@@ -1343,7 +1273,7 @@ def _udpfast_renew_days(message, creator_id):
     user  = message.text.strip()
     d_rem = days_remaining(creator_id)
     msg   = bot.send_message(message.chat.id,
-        f"⏳ <b>Jours à ajouter pour</b> <code>{user}</code>\n\n"
+        f"⏳ <b>Jours à ajouter pour</b> <code>{hx(user)}</code>\n\n"
         f"📌 Exemple : <code>7</code> | Max : <b>{d_rem}j</b>",
         parse_mode="HTML",
         reply_markup=cancel_keyboard("udpfast"))
@@ -1398,7 +1328,7 @@ def list_udpfast(call):
     if users:
         for u in users:
             markup.add(InlineKeyboardButton(f"👤 {u}", callback_data=f"view_udpfast_{u}"))
-        text = f"📋 <b>LISTE DES COMPTES UDP FAST sur 🜲 THE_S_TECH TUNNEL 🜲</b>\nSélectionnez un compte :"
+        text = f"📋 <b>LISTE DES COMPTES UDP FAST sur {BRAND}</b>\nSélectionnez un compte :"
     else:
         text = "📋 Aucun compte UDP FAST trouvé."
     markup.add(InlineKeyboardButton("🔙 Retour Accueil", callback_data="action_home"))
@@ -1411,22 +1341,22 @@ def view_udpfast_account(call):
     ip, domain, _ = get_system_info()
     password = "*******"
     expiry = subprocess.getoutput(
-        f"chage -l {user} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
+        f"chage -l {shlex.quote(user)} 2>/dev/null | grep 'Account expires' | cut -d: -f2"
     ).strip() or "N/A"
     details = (
         f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
         f"┃      UDP FAST ACCOUNT \n"
         f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
-        f"👤 Username: <code>{user}</code>\n"
-        f"🔑 Password: <code>{password}</code>\n"
+        f"👤 Username: <code>{hx(user)}</code>\n"
+        f"🔑 Password: <code>{hx(password)}</code>\n"
         f"⏳ Expiry: <code>{expiry}</code>\n"
         f"🖥️ IP: <code>{ip}</code>\n"
         f"🌐 Host: <code>{domain}</code>\n"
         f"🔌 Port UDP: <code>1-65535</code>\n"
-        f"🚀 Config: <code>{ip}:1-65535@{user}:{password}</code>\n"
+        f"🚀 Config: <code>{ip}:1-65535@{user}:{hx(password)}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ Développé par 🜲 THE_S TECH.✅\n"
-        f" ━━━━━━━━━━━━━━━━━━━━━━━━"
+        f"✅ {BRAND}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -1435,9 +1365,6 @@ def view_udpfast_account(call):
     )
     _show_submenu(call, details, markup)
 
-# ══════════════════════════════════════════
-#  XRAY (VMESS / VLESS / TROJAN / SOCKS)
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data in ("add_vless","add_vmess","add_trojan","add_socks"))
 def add_xray_start(call):
     uid   = call.from_user.id
@@ -1445,7 +1372,7 @@ def add_xray_start(call):
     proto = call.data.split("_", 1)[1]
     d_rem = days_remaining(uid)
     if d_rem == 0 and not is_admin(uid):
-        _show_submenu(call, f"❌ Abonnement expiré sur 🜲 THE_S_TECH TUNNEL 🜲.",
+        _show_submenu(call, f"❌ Abonnement expiré sur {BRAND}.",
                       InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Retour", callback_data=f"menu_{proto}")]]))
         return
     bot.edit_message_text(f"⚙️ Module {proto.upper()} — Création",
@@ -1492,7 +1419,7 @@ def _xray_get_days(message, user, proto, creator_id):
         bot.register_next_step_handler(msg, _xray_get_days, user, proto, creator_id)
         return
     days_int = int(message.text.strip())
-    bot.send_message(message.chat.id, f"⚙️ Injection de <b>{user}</b> ({proto.upper()})...", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"⚙️ Injection de <b>{hx(user)}</b> ({proto.upper()})...", parse_mode="HTML")
     success, res = xray_core.create_xray_account(proto, user, days_int, created_by_id=creator_id)
     if success:
         notify_owner_account_created(creator_id, proto.upper(), user, days_int)
@@ -1517,7 +1444,7 @@ def _xray_renew_get_days(message, proto, creator_id):
     user  = message.text.strip()
     d_rem = days_remaining(creator_id)
     msg   = bot.send_message(message.chat.id,
-        f"⏳ <b>Jours à ajouter pour</b> <code>{user}</code>\n\n"
+        f"⏳ <b>Jours à ajouter pour</b> <code>{hx(user)}</code>\n\n"
         f"📌 Exemple : <code>7</code> | Max : <b>{d_rem}j</b>",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(proto))
@@ -1595,9 +1522,6 @@ def view_xray_account(call):
     )
     _show_submenu(call, details, markup)
 
-# ══════════════════════════════════════════
-#  ZIVPN
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "add_zivpn")
 def add_zivpn_start(call):
     uid   = call.from_user.id
@@ -1667,7 +1591,7 @@ def _zivpn_get_days(message, user, password, creator_id):
         bot.register_next_step_handler(msg, _zivpn_get_days, user, password, creator_id)
         return
     days_int = int(message.text.strip())
-    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{user}</b> (ZIVPN)...", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"⚙️ Création du compte <b>{hx(user)}</b> (ZIVPN)...", parse_mode="HTML")
     success, res = zivpn_core.create_zivpn_account(user, password, days_int, created_by_id=creator_id)
     if success:
         notify_owner_account_created(creator_id, "ZIVPN", user, days_int, password)
@@ -1691,7 +1615,7 @@ def _zivpn_renew_get_days(message, creator_id):
     user  = message.text.strip()
     d_rem = days_remaining(creator_id)
     msg   = bot.send_message(message.chat.id,
-        f"⏳ <b>Jours à ajouter pour</b> <code>{user}</code>\n\n"
+        f"⏳ <b>Jours à ajouter pour</b> <code>{hx(user)}</code>\n\n"
         f"📌 Exemple : <code>7</code> | Max : <b>{d_rem}j</b>",
         parse_mode="HTML",
         reply_markup=cancel_keyboard("zivpn"))
@@ -1764,9 +1688,6 @@ def view_zivpn_account(call):
     )
     _show_submenu(call, details, markup)
 
-# ══════════════════════════════════════════
-#  SYSTÈME
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_status")
 def handle_status(call):
     if not has_access(call.from_user.id): return
@@ -1788,11 +1709,8 @@ def handle_reboot(call):
     if not admin_core.is_super_admin(call.from_user.id): return
     bot.answer_callback_query(call.id, "♻️ Reboot en cours...")
     bot.send_message(call.message.chat.id, "♻️ <b>Reboot VPS lancé.</b>", parse_mode="HTML")
-    subprocess.run("reboot", shell=True)
+    subprocess.run(["reboot"])
 
-# ══════════════════════════════════════════
-#  GESTION ADMINS
-# ══════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: call.data == "menu_admins")
 def handle_menu_admins(call):
     if not is_admin(call.from_user.id): return
@@ -1920,9 +1838,6 @@ def handle_revoke_approval(call):
     else:
         bot.send_message(call.message.chat.id, f"ℹ️ Révocation annulée pour <code>{target_id}</code>.", parse_mode="HTML")
 
-# ══════════════════════════════════════════
-#  LANCEMENT
-# ══════════════════════════════════════════
 if __name__ == "__main__":
     os.makedirs(CONFIG_DIR, exist_ok=True)
     if not os.path.exists(RESELLERS_FILE): save_resellers({})
