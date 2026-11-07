@@ -118,12 +118,5 @@ cp katashie_whatsapp_bot/config.example.json /etc/katashie_whatsapp_bot/config.j
 3. Créez des plans dans le panneau → les clients paient directement sur la page de vente
 4. Les comptes VPN sont créés automatiquement après paiement réussi
 
-## 📞 Support
 
-- **Telegram:** [@abess237](https://t.me/abess237)
-- **WhatsApp:** [+237 682 229 367](https://wa.me/237682229367)
-- **Groupe WhatsApp:** [Rejoindre](https://chat.whatsapp.com/Ed08KdCa94L2mDsbtWmkMu)
-- **Chaîne WhatsApp:** [S'abonner](https://whatsapp.com/channel/0029Vb8J9L44Y9li0Ffkqu1J)
-
----
 © 2025 KATASHIE VPN — Tous droits réservés
