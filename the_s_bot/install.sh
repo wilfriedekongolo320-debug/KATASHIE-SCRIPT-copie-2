@@ -87,6 +87,10 @@ def clean_brand(value):
 
 BRAND       = clean_brand(config.get('brand', DEFAULT_BRAND))
 
+def own_kwargs(uid):
+    """Un revendeur est restreint à ses propres comptes ; un admin ne l'est pas."""
+    return {"requester_id": uid, "restrict": not is_admin(uid)}
+
 def hx(value):
     """Échappe un texte (nom, mot de passe, message...) avant de l'insérer dans un message HTML Telegram."""
     return html.escape(str(value), quote=False)
@@ -347,6 +351,8 @@ def main_menu_keyboard(uid):
         markup.add(InlineKeyboardButton("🏷️ Définir ma marque", callback_data="set_brand_menu"))
     else:
         markup.add(InlineKeyboardButton(f"📩 Contacter {BRAND}", callback_data="contact_pps"))
+    if not is_admin(uid):
+        markup.add(InlineKeyboardButton("📂 Mes comptes", callback_data="my_accounts"))
     return markup
 
 def protocol_menu_keyboard(proto, uid):
@@ -882,7 +888,7 @@ def _ssh_renew_execute(message, user, creator_id):
         bot.register_next_step_handler(msg, _ssh_renew_execute, user, creator_id)
         return
     days_int = int(message.text.strip())
-    success, res = ssh_core.renew_ssh_account(user, days_int)
+    success, res = ssh_core.renew_ssh_account(user, days_int, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_ssh")
@@ -901,7 +907,7 @@ def _ssh_del_execute(message, creator_id):
     if message.text and message.text.startswith("/"):
         return
     user = message.text.strip()
-    success, res = ssh_core.delete_ssh_account(user)
+    success, res = ssh_core.delete_ssh_account(user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data in ("lock_ssh", "unlock_ssh"))
@@ -923,9 +929,9 @@ def _ssh_lock_execute(message, action, creator_id):
         return
     user = message.text.strip()
     if action == "lock_ssh":
-        success, res = ssh_core.lock_ssh_account(user)
+        success, res = ssh_core.lock_ssh_account(user, **own_kwargs(creator_id))
     else:
-        success, res = ssh_core.unlock_ssh_account(user)
+        success, res = ssh_core.unlock_ssh_account(user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_ssh")
@@ -1124,7 +1130,7 @@ def _slowdns_renew_exec(message, user, creator_id):
         bot.register_next_step_handler(msg, _slowdns_renew_exec, user, creator_id)
         return
     days_int = int(message.text.strip())
-    success, res = ssh_core.renew_ssh_account(user, days_int)
+    success, res = ssh_core.renew_ssh_account(user, days_int, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_slowdns")
@@ -1143,7 +1149,7 @@ def _slowdns_del_exec(message, creator_id):
     if message.text and message.text.startswith("/"):
         return
     user = message.text.strip()
-    success, res = ssh_core.delete_ssh_account(user)
+    success, res = ssh_core.delete_ssh_account(user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_slowdns")
@@ -1341,7 +1347,7 @@ def _udpfast_renew_exec(message, user, creator_id):
         bot.register_next_step_handler(msg, _udpfast_renew_exec, user, creator_id)
         return
     days_int = int(message.text.strip())
-    success, res = ssh_core.renew_ssh_account(user, days_int)
+    success, res = ssh_core.renew_ssh_account(user, days_int, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_udpfast")
@@ -1360,7 +1366,7 @@ def _udpfast_del_exec(message, creator_id):
     if message.text and message.text.startswith("/"):
         return
     user = message.text.strip()
-    success, res = ssh_core.delete_ssh_account(user)
+    success, res = ssh_core.delete_ssh_account(user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_udpfast")
@@ -1512,7 +1518,7 @@ def _xray_renew_execute(message, proto, user, creator_id):
         bot.register_next_step_handler(msg, _xray_renew_execute, proto, user, creator_id)
         return
     days_int = int(message.text.strip())
-    success, res = xray_core.renew_xray_account(proto, user, days_int)
+    success, res = xray_core.renew_xray_account(proto, user, days_int, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data in ("del_vless","del_vmess","del_trojan","del_socks"))
@@ -1532,7 +1538,7 @@ def _xray_del_execute(message, proto, creator_id):
     if message.text and message.text.startswith("/"):
         return
     user = message.text.strip()
-    success, res = xray_core.delete_xray_account(proto, user)
+    success, res = xray_core.delete_xray_account(proto, user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data in ("list_vless","list_vmess","list_trojan","list_socks"))
@@ -1683,7 +1689,7 @@ def _zivpn_renew_execute(message, user, creator_id):
         bot.register_next_step_handler(msg, _zivpn_renew_execute, user, creator_id)
         return
     days_int = int(message.text.strip())
-    success, res = zivpn_core.renew_zivpn_account(user, days_int)
+    success, res = zivpn_core.renew_zivpn_account(user, days_int, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_zivpn")
@@ -1702,7 +1708,7 @@ def _zivpn_del_execute(message, creator_id):
     if message.text and message.text.startswith("/"):
         return
     user = message.text.strip()
-    success, res = zivpn_core.delete_zivpn_account(user)
+    success, res = zivpn_core.delete_zivpn_account(user, **own_kwargs(creator_id))
     bot.send_message(message.chat.id, res, parse_mode="HTML", reply_markup=main_menu_keyboard(creator_id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_zivpn")
@@ -1887,6 +1893,54 @@ def handle_revoke_approval(call):
     else:
         bot.send_message(call.message.chat.id, f"ℹ️ Révocation annulée pour <code>{target_id}</code>.", parse_mode="HTML")
 
+
+def _expiry_label(expiry):
+    try:
+        d = datetime.strptime(str(expiry), "%Y-%m-%d").date()
+    except ValueError:
+        return "date inconnue"
+    left = (d - datetime.now().date()).days
+    return f"expire le {d.isoformat()} ({left} j)" if left > 0 else f"expiré le {d.isoformat()}"
+
+@bot.callback_query_handler(func=lambda call: call.data == "my_accounts")
+def my_accounts(call):
+    """Liste des comptes créés par la personne qui clique (un revendeur ne voit que les siens)."""
+    uid = call.from_user.id
+    if not has_access(uid): return
+    sections = []
+    ssh = ssh_core.list_owned(uid)
+    if ssh:
+        sections.append(("🔑 <b>SSH / SlowDNS / UDP Fast</b>",
+                         [f"• <code>{hx(u)}</code> — {_expiry_label(e)}{' 🔒 verrouillé' if lk else ''}" for u, e, lk in ssh]))
+    for proto, items in xray_core.list_owned(uid).items():
+        sections.append((f"🔰 <b>{proto.upper()}</b>", [f"• <code>{hx(u)}</code> — {_expiry_label(e)}" for u, e in items]))
+    zi = zivpn_core.list_owned(uid)
+    if zi:
+        sections.append(("📱 <b>ZIVPN</b>", [f"• <code>{hx(u)}</code> — {_expiry_label(e)}" for u, e in zi]))
+    total = sum(len(lines) for _, lines in sections)
+    if not total:
+        pages = ["📂 <b>Mes comptes</b>\n\nVous n'avez créé aucun compte pour le moment."]
+    else:
+        limit, head = 3500, "📂 <b>Mes comptes</b>"
+        pages, current = [], f"{head} — {total} compte(s)\n"
+        for title, lines in sections:
+            if len(current) + len(title) + 2 > limit:
+                pages.append(current); current = f"{head} (suite)\n"
+            current += f"\n{title}\n"
+            for line in lines:
+                if len(current) + len(line) + 1 > limit:
+                    pages.append(current); current = f"{head} (suite)\n\n{title} (suite)\n"
+                current += line + "\n"
+        pages.append(current)
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Retour Accueil", callback_data="action_home"))
+    for i, page in enumerate(pages):
+        last = (i == len(pages) - 1)
+        if i == 0:
+            _show_submenu(call, page.rstrip(), markup if last else None)
+        else:
+            bot.send_message(call.message.chat.id, page.rstrip(), parse_mode="HTML", reply_markup=markup if last else None)
+
 if __name__ == "__main__":
     os.makedirs(CONFIG_DIR, exist_ok=True)
     if not os.path.exists(RESELLERS_FILE): save_resellers({})
@@ -2053,6 +2107,21 @@ def is_expired(value):
 
 
 # ── Mise en forme HTML (Telegram) ──────────────────────────────────────────
+def owned(info, requester_id, restrict):
+    """Propriété d'un compte. Avec restrict=True (revendeur), seul le créateur du compte peut agir ;
+    un compte sans créateur connu n'appartient à personne. Sans restrict (admins), tout est permis."""
+    if not restrict:
+        return True
+    owner = (info or {}).get("created_by")
+    return owner is not None and str(owner) == str(requester_id)
+
+
+def not_yours(user, extra=""):
+    # Même message que « introuvable » : un revendeur ne peut pas deviner les comptes des autres.
+    return False, (f"❌ Compte <b>{esc(user)}</b> introuvable parmi vos comptes{extra}.\n"
+                   "📂 Le bouton « Mes comptes » du menu principal affiche la liste de vos comptes.")
+
+
 def esc(value):
     return html.escape(str(value), quote=False)
 
@@ -2232,107 +2301,4 @@ SSH_PORT = "22"
 WS_PORT  = "80"
 
 
-def _reg():
-    return c.load_json(REG, {})
-
-
-def _save(reg):
-    c.save_json(REG, reg)
-
-
-def _exists(user):
-    try:
-        pwd.getpwnam(user)
-        return True
-    except KeyError:
-        return False
-
-
-def _check_name(user):
-    if not NAME_RE.match(user or ""):
-        return ("❌ Nom SSH invalide : 4 à 32 caractères, minuscules, chiffres, <code>_</code> et "
-                "<code>-</code>, et il doit commencer par une lettre minuscule.")
-    return None
-
-
-def _ensure_false_shell():
-    try:
-        with open("/etc/shells", "r+", encoding="utf-8") as f:
-            if "/bin/false" not in f.read().split():
-                f.write("\n/bin/false\n")
-    except OSError:
-        pass
-
-
-def _kill_sessions(user):
-    c.run(["pkill", "-KILL", "-u", user])
-
-
-def create_ssh_account(user, password, days, created_by_id=None):
-    user = (user or "").strip()
-    err = _check_name(user)
-    if err:
-        return False, err
-    if not password or len(password) < 4 or any(ord(ch) < 32 for ch in password):
-        return False, "❌ Mot de passe invalide (4 caractères minimum, sans caractères de contrôle)."
-    days = int(days)
-    with c.state_lock():
-        reg = _reg()
-        if user in reg or _exists(user):
-            return False, f"❌ Le compte <b>{c.esc(user)}</b> existe déjà."
-        _ensure_false_shell()
-        expiry = c.calc_expiry(days)
-        rc, _, e = c.run(["useradd", "-M", "-s", "/bin/false", "-e", expiry.isoformat(), user])
-        if rc != 0:
-            return False, f"❌ Échec de création : {c.esc(e or rc)}"
-        rc, _, e = c.run(["chpasswd"], input_text=f"{user}:{password}\n")
-        if rc != 0:
-            c.run(["userdel", user])
-            return False, f"❌ Échec du mot de passe : {c.esc(e or rc)}"
-        reg[user] = {"expiry": expiry.isoformat(), "created_by": created_by_id,
-                     "created_at": c.date.today().isoformat(), "locked": False}
-        _save(reg)
-    return True, c.card("SSH/WS ACCOUNT", [
-        c.kv("👤", "Username", user),
-        c.kv("🔑", "Password", password),
-        c.kv("⏳", "Expiry", expiry.isoformat()),
-        c.kv("🖥️", "IP", c.get_ip()),
-        c.kv("🌐", "Domain", c.get_domain()),
-        c.kv("🔌", "Port SSH", SSH_PORT),
-        c.kv("🔌", "Port WS", WS_PORT),
-    ])
-
-
-def renew_ssh_account(user, days):
-    user = (user or "").strip()
-    with c.state_lock():
-        reg = _reg()
-        if user not in reg or not _exists(user):
-            return False, f"❌ Compte <b>{c.esc(user)}</b> introuvable (comptes gérés par le bot uniquement)."
-        new = c.calc_expiry(int(days), c.parse_date(reg[user].get("expiry")))
-        rc, _, e = c.run(["usermod", "-e", new.isoformat(), user])
-        if rc != 0:
-            return False, f"❌ Échec du renouvellement : {c.esc(e or rc)}"
-        reg[user]["expiry"] = new.isoformat()
-        _save(reg)
-    return True, (f"✅ Compte <b>{c.esc(user)}</b> renouvelé de <b>{int(days)}</b> jour(s).\n"
-                  f"⏳ Nouvelle expiration : <code>{new.isoformat()}</code>")
-
-
-def delete_ssh_account(user):
-    user = (user or "").strip()
-    with c.state_lock():
-        reg = _reg()
-        if user not in reg:
-            return False, f"❌ Compte <b>{c.esc(user)}</b> introuvable (comptes gérés par le bot uniquement)."
-        _kill_sessions(user)
-        rc, _, e = c.run(["userdel", user])
-        if rc not in (0, 6) and _exists(user):
-            return False, f"❌ Échec de suppression : {c.esc(e or rc)}"
-        reg.pop(user, None)
-        _save(reg)
-    return True, f"🗑️ Compte <b>{c.esc(user)}</b> supprimé."
-
-
-def lock_ssh_account(user):
-    user = (user or "").strip()
+def _reg()
