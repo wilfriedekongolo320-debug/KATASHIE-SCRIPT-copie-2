@@ -60,7 +60,7 @@ show_banner() {
 BANNER
     echo -e "${NC}"
     echo -e "${BLUE}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-    echo -e "${BLUE}┃${NC} ${BG_BLUE}          KATASHIE VPN — Auto-Installer v${KATASHIE_VERSION}       ${NC} ${BLUE}┃${NC}"
+    echo -e "${BLUE}┃${NC} ${BG_BLUE}          THE_S VPN — Auto-Installer v${KATASHIE_VERSION}       ${NC} ${BLUE}┃${NC}"
     echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
     echo ""
 }
@@ -152,9 +152,9 @@ show_tns() {
     echo -e "${BLUE}┃${NC} ${GREEN}Bienvenue dans KATASHIE VPN!${NC}"
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┃${NC} ${WHITE}[*] Lisez attentivement les conditions ci-dessous${NC}"
-    echo -e "${BLUE}┃${NC} ${WHITE}[*] KATASHIE VPN est fourni tel quel, sans garantie.${NC}"
+    echo -e "${BLUE}┃${NC} ${WHITE}[*] THE_S VPN est fourni tel quel, sans garantie.${NC}"
     echo -e "${BLUE}┃${NC} ${WHITE}[*] N'utilisez pas ce service pour des activités illégales.${NC}"
-    echo -e "${BLUE}┃${NC} ${WHITE}[*] KATASHIE VPN n'est pas responsable des pertes de données.${NC}"
+    echo -e "${BLUE}┃${NC} ${WHITE}[*] THE_S 🔥VPN n'est pas responsable des pertes de données.${NC}"
     echo -e "${BLUE}┃${NC} ${WHITE}[*] Vous devez respecter toutes les lois applicables.${NC}"
     echo -e "${BLUE}┃${NC} ${WHITE}[*] Les conditions peuvent changer sans préavis.${NC}"
     echo -e "${BLUE}●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●${NC}"
@@ -373,7 +373,7 @@ katashie_completed() {
     echo -e "${GREEN}┃${NC} ${BG_BLUE}           INSTALLATION TERMINÉE AVEC SUCCÈS      ${NC} ${GREEN}┃${NC}"
     echo -e "${GREEN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
     echo -e "${GREEN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-    echo -e "${GREEN}┃${NC} ${GREEN}✔ KATASHIE VPN est prêt à l'emploi!${NC}"
+    echo -e "${GREEN}┃${NC} ${GREEN}✔ THE_S🔥 VPN est prêt à l'emploi!${NC}"
     echo -e "${GREEN}┃${NC}"
     echo -e "${GREEN}┃${NC} ${WHITE}Domaine  : ${domain}${NC}"
     echo -e "${GREEN}┃${NC} ${WHITE}IP VPS   : ${MYIP}${NC}"
@@ -382,7 +382,7 @@ katashie_completed() {
     echo -e "${GREEN}┃${NC} ${YELLOW}Le serveur va redémarrer dans 10 secondes.${NC}"
     echo -e "${GREEN}┃${NC} ${YELLOW}Reconnectez-vous pour accéder au menu.${NC}"
     echo -e "${GREEN}┃${NC}"
-    echo -e "${GREEN}┃${NC} ${WHITE}Script by KATASHIE TEAM${NC}"
+    echo -e "${GREEN}┃${NC} ${WHITE}Script by the_s@ TEAM${NC}"
     echo -e "${GREEN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
     echo -e "${GREEN}●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●${NC}"
 }
