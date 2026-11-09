@@ -7,7 +7,7 @@ RESELLERS_FILE="$CONFIG_DIR/resellers.json"
 CONVS_FILE="$CONFIG_DIR/convs.json"
 VISITORS_FILE="$CONFIG_DIR/visitors.json"
 APP_DIR="/opt/the-s-bot"
-DEFAULT_BRAND="🔥THE_S-TUNNEL-PRO☄️📶🛜"
+DEFAULT_BRAND="🔥THE_S-TUNNEL-PRO☄️"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "❌ Exécutez ce script en root (sudo bash install.sh)." >&2
