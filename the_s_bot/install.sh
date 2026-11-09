@@ -7,7 +7,7 @@ RESELLERS_FILE="$CONFIG_DIR/resellers.json"
 CONVS_FILE="$CONFIG_DIR/convs.json"
 VISITORS_FILE="$CONFIG_DIR/visitors.json"
 APP_DIR="/opt/the-s-bot"
-DEFAULT_BRAND="🔥THE_S-TUNNEL-PRO☄️"
+DEFAULT_BRAND="🔥THE_S-TUNNEL-PRO☄️📶🛜"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "❌ Exécutez ce script en root (sudo bash install.sh)." >&2
@@ -1766,10 +1766,9 @@ def handle_reboot(call):
     bot.send_message(call.message.chat.id, "♻️ <b>Reboot VPS lancé.</b>", parse_mode="HTML")
     subprocess.run(["reboot"])
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_admins")
-def handle_menu_admins(call):
-    if not is_admin(call.from_user.id): return
-    is_super = admin_core.is_super_admin(call.from_user.id)
+def _admin_panel(uid):
+    """Texte et boutons du panneau d'administration (bouton ADMINS ou commande /admin)."""
+    is_super = admin_core.is_super_admin(uid)
     markup   = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("📋 Liste des admins",       callback_data="list_admins"),
@@ -1781,8 +1780,23 @@ def handle_menu_admins(call):
         InlineKeyboardButton("❌ Supprimer un admin",      callback_data="req_del_admin"),
         InlineKeyboardButton("🔙 Retour Accueil",         callback_data="action_home")
     )
-    msg = admin_core.list_admins()
+    return admin_core.list_admins(), markup
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu_admins")
+def handle_menu_admins(call):
+    if not is_admin(call.from_user.id): return
+    msg, markup = _admin_panel(call.from_user.id)
     _show_submenu(call, msg, markup)
+
+@bot.message_handler(commands=['admin', 'admins'])
+def cmd_admin_panel(message):
+    """Raccourci : /admin ou /admins ouvre directement le panneau d'administration."""
+    uid = message.from_user.id
+    if not is_admin(uid):
+        bot.reply_to(message, f"🔒 Réservé aux administrateurs de {BRAND}.")
+        return
+    msg, markup = _admin_panel(uid)
+    bot.send_message(message.chat.id, msg, parse_mode="HTML", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_admins")
 def handle_list_admins(call):
@@ -2280,25 +2294,3 @@ def clean_system_logs():
     after = _dir_size("/var/log")
     freed = max(0, before - after)
     return (f"🧹 <b>Nettoyage terminé</b>\n\n💾 Libéré : <code>{_human(freed)}</code>\n"
-            f"📁 /var/log : <code>{_human(after)}</code>")
-MODULE_EOF
-
-cat << 'MODULE_EOF' > "$CONFIG_DIR/modules/ssh_core.py"
-"""Gestion des comptes SSH (SSH, SlowDNS et UDP Fast utilisent ces comptes).
-
-Sécurité : seuls les comptes créés par le bot (registre ssh_accounts.json) peuvent être
-renouvelés, verrouillés ou supprimés. Impossible de toucher à root ou à un compte système.
-"""
-import os
-import pwd
-import re
-
-from modules import common as c
-
-REG      = os.path.join(c.CONFIG_DIR, "ssh_accounts.json")
-NAME_RE  = re.compile(r"^[a-z][a-z0-9_-]{3,31}$")
-SSH_PORT = "22"
-WS_PORT  = "80"
-
-
-def _reg()
