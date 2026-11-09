@@ -1717,10 +1717,9 @@ def handle_reboot(call):
     bot.send_message(call.message.chat.id, "♻️ <b>Reboot VPS lancé.</b>", parse_mode="HTML")
     subprocess.run(["reboot"])
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_admins")
-def handle_menu_admins(call):
-    if not is_admin(call.from_user.id): return
-    is_super = admin_core.is_super_admin(call.from_user.id)
+def _admin_panel(uid):
+    """Texte et boutons du panneau d'administration (bouton ADMINS ou commande /admin)."""
+    is_super = admin_core.is_super_admin(uid)
     markup   = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("📋 Liste des admins",       callback_data="list_admins"),
@@ -1732,8 +1731,23 @@ def handle_menu_admins(call):
         InlineKeyboardButton("❌ Supprimer un admin",      callback_data="req_del_admin"),
         InlineKeyboardButton("🔙 Retour Accueil",         callback_data="action_home")
     )
-    msg = admin_core.list_admins()
+    return admin_core.list_admins(), markup
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu_admins")
+def handle_menu_admins(call):
+    if not is_admin(call.from_user.id): return
+    msg, markup = _admin_panel(call.from_user.id)
     _show_submenu(call, msg, markup)
+
+@bot.message_handler(commands=['admin', 'admins'])
+def cmd_admin_panel(message):
+    """Raccourci : /admin ou /admins ouvre directement le panneau d'administration."""
+    uid = message.from_user.id
+    if not is_admin(uid):
+        bot.reply_to(message, f"🔒 Réservé aux administrateurs de {BRAND}.")
+        return
+    msg, markup = _admin_panel(uid)
+    bot.send_message(message.chat.id, msg, parse_mode="HTML", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "list_admins")
 def handle_list_admins(call):
